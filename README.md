@@ -59,7 +59,8 @@ Most RAG systems follow a simple pipeline: split text → embed → retrieve →
 
 ## Features
 
-### Deep Document Parsing (Docling)
+<details>
+<summary><b>Deep Document Parsing (Docling)</b></summary>
 
 NexusRAG uses [Docling](https://github.com/docling-project/docling) for structural document understanding — not just text extraction:
 
@@ -69,7 +70,10 @@ NexusRAG uses [Docling](https://github.com/docling-project/docling) for structur
 - **Hybrid chunking** — `HybridChunker(max_tokens=512, merge_peers=True)` respects semantic AND structural boundaries — never splits mid-heading or mid-table
 - **Page-aware metadata** — Every chunk carries its page number, heading path, and references to images/tables on the same page
 
-### Hybrid Retrieval Pipeline
+</details>
+
+<details open>
+<summary><b>Hybrid Retrieval Pipeline</b></summary>
 
 | Stage | Technology | Details |
 |---|---|---|
@@ -88,9 +92,10 @@ NexusRAG uses [Docling](https://github.com/docling-project/docling) for structur
 3. **Filtering** — Keep top-8 above relevance threshold (0.15), with fallback to top-3 if all below
 4. **Media discovery** — Find images and tables on the same pages as retrieved chunks
 
----
+</details>
 
-### Visual Document Intelligence
+<details>
+<summary><b>Visual Document Intelligence</b></summary>
 
 Images and tables are **embedded into chunk vectors** — not stored separately. When Docling extracts an image on page 5, its LLM-generated caption is appended to the text chunks on that page before embedding. This means searching for "revenue chart" finds chunks that contain the chart description, without needing a separate image search index.
 
@@ -107,9 +112,10 @@ Images and tables are **embedded into chunk vectors** — not stored separately.
 3. Summaries appended to page chunks: `[Table on page 5 (3x4)]: Annual sales by region`
 4. Table summaries injected back into document Markdown as blockquotes for the document viewer
 
----
+</details>
 
-### Citation System
+<details>
+<summary><b>Citation System</b></summary>
 
 Every answer is grounded in source documents with **4-character citation IDs** (e.g., `[a3z1]`):
 
@@ -119,9 +125,10 @@ Every answer is grounded in source documents with **4-character citation IDs** (
 - **Image references** — Visual content cited separately as `[IMG-p4f2]` with page tracking
 - **Strict grounding** — The LLM is instructed to only cite sources that directly support claims, max 3 per sentence
 
----
+</details>
 
-### Knowledge Graph Visualization
+<details>
+<summary><b>Knowledge Graph Visualization</b></summary>
 
 Interactive force-directed graph built from extracted entities and relationships:
 
@@ -133,9 +140,10 @@ Interactive force-directed graph built from extracted entities and relationships
 - **Query modes** — Naive, Local (multi-hop), Global (summary), Hybrid (default)
 - **No extra services** — LightRAG uses file-based storage (NetworkX + NanoVectorDB), zero Docker overhead
 
----
+</details>
 
-### Multi-Provider LLM
+<details>
+<summary><b>Multi-Provider LLM</b></summary>
 
 Switch between cloud and local models with a single environment variable:
 
@@ -170,9 +178,10 @@ GOOGLE_AI_API_KEY=your-key
 # OLLAMA_MODEL=gemma3:12b
 ```
 
----
+</details>
 
-### Agentic Streaming Chat
+<details>
+<summary><b>Agentic Streaming Chat</b></summary>
 
 The chat system uses a semi-agentic architecture with real-time SSE streaming:
 
@@ -184,9 +193,10 @@ The chat system uses a semi-agentic architecture with real-time SSE streaming:
 - **Fallback** — If Ollama produces empty output, auto-triggers search + retry
 - **Chat history** — Persistent per workspace with message ratings (thumbs up/down)
 
----
+</details>
 
-### UI / UX
+<details>
+<summary><b>UI / UX</b></summary>
 
 **Theme & Layout**
 - Dark / Light mode with smooth transition, persisted preference
@@ -222,19 +232,23 @@ The chat system uses a semi-agentic architecture with real-time SSE streaming:
 - Loading skeletons, toast notifications, empty state illustrations
 - Keyboard shortcuts: `/` to focus search, `Enter` to send, `Escape` to cancel
 
----
+</details>
 
-### Workspace System
+<details>
+<summary><b>Workspace System</b></summary>
 
 - Multiple isolated knowledge bases, each with its own documents, ChromaDB collection, and KG
 - Custom system prompt per workspace (override default Q&A behavior)
 - Independent chat history with message persistence and ratings
 
+</details>
+
 ---
 
 ## Tech Stack
 
-### Backend
+<details>
+<summary><b>Backend</b></summary>
 
 | Technology | Purpose |
 |---|---|
@@ -247,7 +261,10 @@ The chat system uses a semi-agentic architecture with real-time SSE streaming:
 | **google-genai** | Gemini API — chat, vision, function calling, extended thinking |
 | **ollama** | Local LLM — tool calling via prompt tags, multimodal support |
 
-### Frontend
+</details>
+
+<details>
+<summary><b>Frontend</b></summary>
 
 | Technology | Purpose |
 |---|---|
@@ -260,7 +277,10 @@ The chat system uses a semi-agentic architecture with real-time SSE streaming:
 | **react-markdown** + **KaTeX** | Rich markdown with LaTeX math rendering |
 | **Lucide React** | Icon library |
 
-### Infrastructure
+</details>
+
+<details>
+<summary><b>Infrastructure</b></summary>
 
 | Technology | Purpose |
 |---|---|
@@ -269,6 +289,8 @@ The chat system uses a semi-agentic architecture with real-time SSE streaming:
 | **LightRAG** | File-based KG (NetworkX + NanoVectorDB — no extra services) |
 | **Docker Compose** | Full-stack deployment (4 containers) |
 | **nginx** | Production frontend serving + API/SSE reverse proxy |
+
+</details>
 
 ---
 
@@ -306,7 +328,8 @@ The script checks prerequisites, creates venv, installs deps, starts PostgreSQL 
 
 Open http://localhost:5174
 
-### System Requirements
+<details>
+<summary><b>System Requirements</b></summary>
 
 | Resource | Minimum | Recommended |
 |---|---|---|
@@ -316,9 +339,12 @@ Open http://localhost:5174
 | Node.js | 18+ | 22 LTS |
 | Docker | 20+ | Latest |
 
+</details>
+
 ---
 
-## Configuration
+<details>
+<summary><h2>Configuration</h2></summary>
 
 Copy `.env.example` and configure:
 
@@ -355,6 +381,8 @@ cp .env.example .env
 | `NEXUSRAG_ENABLE_IMAGE_EXTRACTION` | `true` | Extract images from documents |
 | `NEXUSRAG_ENABLE_IMAGE_CAPTIONING` | `true` | LLM-caption images for search |
 | `NEXUSRAG_KG_LANGUAGE` | `Vietnamese` | KG extraction language |
+
+</details>
 
 ---
 
