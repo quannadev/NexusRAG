@@ -232,6 +232,7 @@ export interface LLMCapabilities {
   model: string;
   supports_thinking: boolean;
   supports_vision: boolean;
+  thinking_default: boolean;
 }
 
 // SSE Streaming Types

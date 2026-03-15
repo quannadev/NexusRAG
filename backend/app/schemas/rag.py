@@ -260,6 +260,7 @@ class LLMCapabilitiesResponse(BaseModel):
     model: str
     supports_thinking: bool
     supports_vision: bool
+    thinking_default: bool = True
 
 
 # ---------------------------------------------------------------------------

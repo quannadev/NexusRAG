@@ -989,6 +989,8 @@ const MessageBubble = memo(function MessageBubble({
               />
               <span className="streaming-cursor" />
             </div>
+          ) : message.thinking ? (
+            <InlineThinkingPreview text={message.thinking} />
           ) : null
         ) : (
           <div className={proseClasses}>
@@ -1041,6 +1043,50 @@ const MessageBubble = memo(function MessageBubble({
     </motion.div>
   );
 });
+
+// ---------------------------------------------------------------------------
+// Inline thinking preview — shown in message body while model is thinking
+// ---------------------------------------------------------------------------
+
+function InlineThinkingPreview({ text }: { text: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isUserScrolledRef = useRef(false);
+
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+    isUserScrolledRef.current = !isAtBottom;
+  }, []);
+
+  useEffect(() => {
+    if (containerRef.current && !isUserScrolledRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, [text]);
+
+  return (
+    <div className="mt-1">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <Brain className="w-3.5 h-3.5 text-violet-400 animate-pulse" />
+        <span className="text-xs font-medium text-violet-400">Thinking...</span>
+      </div>
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className={cn(
+          "text-xs leading-relaxed text-muted-foreground/70 italic",
+          "max-h-[200px] overflow-y-auto scrollbar-none",
+          "border-l-2 border-violet-500/30 pl-3",
+          "whitespace-pre-wrap break-words",
+        )}
+      >
+        {text}
+        <span className="animate-pulse text-violet-400 ml-0.5">|</span>
+      </div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Typing indicator
@@ -1186,7 +1232,8 @@ export const ChatPanel = memo(function ChatPanel({
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [enableThinking, setEnableThinking] = useState(true);
+  const [enableThinking, setEnableThinking] = useState(false);
+  const [thinkingDefaultSynced, setThinkingDefaultSynced] = useState(false);
   const [forceSearch, setForceSearch] = useState(false);
 
   // Load chat history from PostgreSQL
@@ -1260,6 +1307,14 @@ export const ChatPanel = memo(function ChatPanel({
     retry: 1,
   });
   const thinkingSupported = capabilities?.supports_thinking ?? false;
+
+  // Sync thinking toggle default from server (once per mount)
+  useEffect(() => {
+    if (capabilities && !thinkingDefaultSynced) {
+      setEnableThinking(capabilities.thinking_default);
+      setThinkingDefaultSynced(true);
+    }
+  }, [capabilities, thinkingDefaultSynced]);
 
   // Sync DB history → local messages state when data loads.
   // IMPORTANT: preserve agentSteps from local state — they are client-side only (not stored in DB).

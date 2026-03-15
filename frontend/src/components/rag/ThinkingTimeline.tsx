@@ -6,7 +6,7 @@
  * - "embedded" — after complete: collapsed summary, click to expand
  */
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Brain,
@@ -64,66 +64,6 @@ function LiveTimer({ startTimestamp }: { startTimestamp: number }) {
     <span className="text-[11px] font-mono tabular-nums text-primary/80">
       {formatMs(elapsed)}
     </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ThinkingTextWindow — scrollable thinking text under "analyzing" step
-// ---------------------------------------------------------------------------
-
-interface ThinkingTextWindowProps {
-  text: string;
-  isStreaming: boolean;
-}
-
-function ThinkingTextWindow({ text, isStreaming }: ThinkingTextWindowProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const isUserScrolledRef = useRef(false);
-
-  const handleScroll = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
-    isUserScrolledRef.current = !isAtBottom;
-  }, []);
-
-  // Auto-scroll to bottom (only if user hasn't scrolled up)
-  useEffect(() => {
-    if (isStreaming && containerRef.current && !isUserScrolledRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
-    }
-  }, [text, isStreaming]);
-
-  // Reset user scroll flag when streaming ends
-  useEffect(() => {
-    if (!isStreaming) isUserScrolledRef.current = false;
-  }, [isStreaming]);
-
-  if (!text) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: "auto" }}
-      className="overflow-hidden"
-    >
-      <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        className={cn(
-          "mt-1 ml-1 text-[10px] leading-relaxed text-muted-foreground/60 italic",
-          "max-h-[80px] sm:max-h-[120px] overflow-y-auto",
-          "border-l border-violet-500/20 pl-2",
-          "whitespace-pre-wrap break-words",
-          isStreaming && "streaming-thinking-mask",
-        )}
-      >
-        {text}
-        {isStreaming && (
-          <span className="animate-pulse text-violet-400 ml-0.5">|</span>
-        )}
-      </div>
-    </motion.div>
   );
 }
 
@@ -270,13 +210,10 @@ function StepNode({ step, isLast, isLive }: StepNodeProps) {
           </div>
         )}
 
-        {/* Thinking text: live streaming → compact window; completed → collapsible log */}
-        {step.step === "analyzing" && step.thinkingText && (
-          isActive ? (
-            <ThinkingTextWindow text={step.thinkingText} isStreaming={true} />
-          ) : (
-            <ThinkingLogSection text={step.thinkingText} />
-          )
+        {/* Thinking text: during active streaming, the inline preview in MessageBubble
+            handles display. After completion, show collapsible log here. */}
+        {step.step === "analyzing" && step.thinkingText && !isActive && (
+          <ThinkingLogSection text={step.thinkingText} />
         )}
       </div>
     </motion.div>

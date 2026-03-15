@@ -30,30 +30,81 @@ NexusRAG combines vector search, knowledge graph, and cross-encoder reranking in
 
 ## Showcase
 
-<!-- Add screenshots to /showcase directory -->
-<!--
-| Chat with Citations | Knowledge Graph |
-|:---:|:---:|
-| ![Chat](showcase/chat_citations.png) | ![KG](showcase/knowledge_graph.png) |
-| **Document Viewer** | **Analytics Dashboard** |
-| ![Viewer](showcase/document_viewer.png) | ![Analytics](showcase/analytics.png) |
--->
+<div align="center">
+
+![NexusRAG Demo](showcase/demo_nexus_video.gif)
+
+</div>
+
+---
+
+## Beyond Traditional RAG
+
+Most RAG systems follow a simple pipeline: split text → embed → retrieve → generate. NexusRAG goes further at every stage:
+
+| Aspect | Traditional RAG | NexusRAG |
+|---|---|---|
+| **Document Parsing** | Plain text extraction, structure lost | Docling: preserves headings, page boundaries, formulas, layout |
+| **Images & Tables** | Ignored entirely | Extracted, captioned by vision LLM, embedded as searchable vectors |
+| **Chunking** | Fixed-size splits, breaks mid-sentence | Hybrid semantic + structural chunking (respects headings, tables) |
+| **Embeddings** | Single model for everything | Dual-model: BAAI/bge-m3 (1024d, search) + Gemini Embedding (3072d, KG) |
+| **Retrieval** | Vector similarity only | 3-way parallel: Vector over-fetch + KG entity lookup + Cross-encoder rerank |
+| **Knowledge** | No entity awareness | LightRAG graph: entity extraction, relationship mapping, multi-hop traversal |
+| **Context** | Raw chunks dumped to LLM | Structured assembly: KG insights → cited chunks → related images/tables |
+| **Citations** | None or manual | Auto-generated 4-char IDs with page number and heading path |
+| **Page awareness** | Lost after chunking | Preserved end-to-end: chunk → citation → document viewer navigation |
 
 ---
 
 ## Features
 
+### Deep Document Parsing (Docling)
+
+NexusRAG uses [Docling](https://github.com/docling-project/docling) for structural document understanding — not just text extraction:
+
+- **Structural preservation** — Heading hierarchy (`H1 > H2 > H3`), page boundaries, paragraph grouping
+- **Formula enrichment** — LaTeX math notation preserved during conversion
+- **Multi-format** — PDF, DOCX, PPTX, HTML, TXT with consistent output
+- **Hybrid chunking** — `HybridChunker(max_tokens=512, merge_peers=True)` respects semantic AND structural boundaries — never splits mid-heading or mid-table
+- **Page-aware metadata** — Every chunk carries its page number, heading path, and references to images/tables on the same page
+
 ### Hybrid Retrieval Pipeline
 
 | Stage | Technology | Details |
 |---|---|---|
-| **Embedding** | BAAI/bge-m3 | 1024-dim multilingual (100+ languages) |
-| **Vector Search** | ChromaDB | Cosine similarity, configurable top-N prefetch |
-| **Knowledge Graph** | LightRAG | Entity/relationship extraction, multi-hop traversal |
-| **Reranking** | BAAI/bge-reranker-v2-m3 | Cross-encoder joint scoring for precision filtering |
+| **Vector Embedding** | BAAI/bge-m3 | 1024-dim multilingual bi-encoder (100+ languages) |
+| **KG Embedding** | Gemini Embedding 001 | 3072-dim for high-fidelity entity/relationship extraction |
+| **Vector Search** | ChromaDB | Cosine similarity, over-fetch top-20 candidates |
+| **Knowledge Graph** | LightRAG | Entity/relationship extraction, keyword-to-entity matching |
+| **Reranking** | BAAI/bge-reranker-v2-m3 | Cross-encoder joint scoring — encodes (query, chunk) pairs together |
 | **Generation** | Gemini / Ollama | Agentic streaming chat with function calling |
 
-The pipeline runs all three retrieval stages in parallel — vector over-fetch + KG query simultaneously, then cross-encoder reranking filters to the most relevant chunks.
+**Why two embedding models?** Vector search needs speed (local bge-m3, 1024-dim). Knowledge graph extraction needs semantic richness for entity recognition (Gemini Embedding, 3072-dim). Each model is optimized for its role.
+
+**Retrieval flow:**
+1. **Parallel retrieval** — Vector over-fetch (top-20) + KG entity lookup run simultaneously
+2. **Cross-encoder reranking** — All 20 candidates scored jointly with the query through a transformer (far more precise than cosine similarity alone)
+3. **Filtering** — Keep top-8 above relevance threshold (0.15), with fallback to top-3 if all below
+4. **Media discovery** — Find images and tables on the same pages as retrieved chunks
+
+---
+
+### Visual Document Intelligence
+
+Images and tables are **embedded into chunk vectors** — not stored separately. When Docling extracts an image on page 5, its LLM-generated caption is appended to the text chunks on that page before embedding. This means searching for "revenue chart" finds chunks that contain the chart description, without needing a separate image search index.
+
+**Image Pipeline**
+1. Docling extracts images from PDF/DOCX/PPTX (up to 50 per document, 2x resolution)
+2. Vision LLM (Gemini Vision or Ollama multimodal) generates captions: specific numbers, labels, trends
+3. Captions appended to page chunks: `[Image on page 5]: Graph showing 12% revenue growth YoY`
+4. Chunk is embedded → **image becomes vector-searchable** through its description
+5. During retrieval, images on matched pages are surfaced as `[IMG-p4f2]` references
+
+**Table Pipeline**
+1. Docling exports tables as structured Markdown (preserving rows, columns, dimensions)
+2. Text LLM summarizes each table: purpose, key columns, notable values (max 500 chars)
+3. Summaries appended to page chunks: `[Table on page 5 (3x4)]: Annual sales by region`
+4. Table summaries injected back into document Markdown as blockquotes for the document viewer
 
 ---
 
@@ -66,29 +117,6 @@ Every answer is grounded in source documents with **4-character citation IDs** (
 - **Cross-navigation** — Click a citation to jump to the exact section in the document viewer
 - **Image references** — Visual content cited separately as `[IMG-p4f2]` with page tracking
 - **Strict grounding** — The LLM is instructed to only cite sources that directly support claims, max 3 per sentence
-
----
-
-### Visual Document Intelligence
-
-Documents aren't just text — images and tables are first-class citizens in the retrieval pipeline:
-
-**Image Extraction & Captioning**
-- Automatic extraction from PDF/DOCX/PPTX via Docling (up to 50 images per document)
-- LLM-generated captions (Gemini Vision or Ollama multimodal) describing charts, diagrams, photos
-- Captions indexed into ChromaDB — **images become searchable via vector similarity**
-- Gallery view with lightbox, lazy loading, and page grouping
-
-**Table Extraction**
-- Structured table parsing to Markdown with row/column metadata
-- LLM-generated table summaries (purpose, key values, trends)
-- Tables with captions indexed as chunks — searchable alongside text
-
-**Document Viewer**
-- Full Markdown rendering with LaTeX math, GFM tables, syntax-highlighted code blocks
-- Interactive Table of Contents with active section tracking (IntersectionObserver)
-- Page dividers extracted from Docling structure
-- Scroll-to-heading and scroll-to-image with highlight animation
 
 ---
 
@@ -115,7 +143,7 @@ Switch between cloud and local models with a single environment variable:
 | Model | Best For | Thinking |
 |---|---|---|
 | `gemini-2.5-flash` | General chat, fast responses | Budget-based (auto) |
-| `gemini-3.1-flash-lite` | High throughput, cost-effective | Level-based: minimal / low / medium / high |
+| `gemini-3.1-flash-lite` | High throughput, cost-effective **Recommended default**| Level-based: minimal / low / medium / high |
 
 Extended thinking is automatically configured — Gemini 2.5 uses `thinking_budget_tokens`, Gemini 3.x uses `thinking_level`.
 
@@ -123,9 +151,9 @@ Extended thinking is automatically configured — Gemini 2.5 uses `thinking_budg
 
 | Model | Parameters | Recommendation |
 |---|---|---|
-| `gemma3:12b` | 12B | Best balance of quality and speed. **Recommended default** |
-| `qwen3.5:9b` | 9B | Good multilingual support, solid tool calling |
+| `qwen3.5:9b` | 9B | Good multilingual support, solid tool calling **Recommended default** |
 | `qwen3.5:4b` | 4B | Lightweight, works on 8GB RAM. May miss some tool calls |
+| `gemma3:12b` | 12B | Best balance of quality and speed.  |
 
 > **Tip**: For Knowledge Graph extraction, larger models (12B+) produce significantly better entity/relationship quality. Smaller models (4B) may extract zero entities on complex documents.
 

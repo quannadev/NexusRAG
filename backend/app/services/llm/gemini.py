@@ -101,15 +101,20 @@ class GeminiLLMProvider(LLMProvider):
         return contents
 
     def _build_thinking_config(self) -> types.ThinkingConfig:
-        """Build ThinkingConfig using ``thinking_level``.
+        """Build ThinkingConfig based on model version.
 
-        Gemini 3.x+ requires ``include_thoughts=True`` to expose thinking
-        text in response parts. Gemini 2.5 exposes it by default.
+        Gemini 2.5: uses ``thinking_budget_tokens`` (does NOT support thinking_level).
+        Gemini 3.x+: uses ``thinking_level`` + ``include_thoughts=True``.
         """
-        kwargs: dict = {"thinking_level": self._thinking_level}
         if self._major_version >= 3:
-            kwargs["include_thoughts"] = True
-        return types.ThinkingConfig(**kwargs)
+            return types.ThinkingConfig(
+                thinking_level=self._thinking_level,
+                include_thoughts=True,
+            )
+        # Gemini 2.5 — use budget-based thinking
+        _BUDGET_MAP = {"minimal": 1024, "low": 2048, "medium": 4096, "high": 8192}
+        budget = _BUDGET_MAP.get(self._thinking_level, 4096)
+        return types.ThinkingConfig(thinking_budget=budget)
 
     # ------------------------------------------------------------------
     # LLMProvider interface
