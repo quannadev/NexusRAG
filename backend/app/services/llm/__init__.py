@@ -71,8 +71,16 @@ def get_embedding_provider() -> EmbeddingProvider:
             model=settings.KG_EMBEDDING_MODEL,
         )
 
+    if provider == "sentence_transformers":
+        from app.services.llm.sentence_transformer import SentenceTransformerEmbeddingProvider
+
+        return SentenceTransformerEmbeddingProvider(
+            model=settings.KG_EMBEDDING_MODEL,
+        )
+
     raise ValueError(
-        f"Unknown KG_EMBEDDING_PROVIDER: {provider!r}. Supported: gemini, ollama"
+        f"Unknown KG_EMBEDDING_PROVIDER: {provider!r}. "
+        "Supported: gemini, ollama, sentence_transformers"
     )
 
 
