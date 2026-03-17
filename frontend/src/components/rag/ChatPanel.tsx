@@ -46,7 +46,7 @@ import cpp from "react-syntax-highlighter/dist/esm/languages/prism/cpp";
 import diff from "react-syntax-highlighter/dist/esm/languages/prism/diff";
 import markdown from "react-syntax-highlighter/dist/esm/languages/prism/markdown";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, generateId } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThemeStore } from "@/stores/useThemeStore";
@@ -1537,14 +1537,14 @@ export const ChatPanel = memo(function ChatPanel({
       if (!msg || stream.isStreaming) return;
 
       const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: "user",
         content: msg,
         timestamp: new Date().toISOString(),
       };
 
       // Add placeholder assistant message for streaming
-      const assistantId = crypto.randomUUID();
+      const assistantId = generateId();
       streamingMsgIdRef.current = assistantId;
       const placeholderMsg: ChatMessage = {
         id: assistantId,

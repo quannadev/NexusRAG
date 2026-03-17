@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     NEXUSRAG_CHUNK_MAX_TOKENS: int = 512
     NEXUSRAG_KG_QUERY_TIMEOUT: float = 30.0
     NEXUSRAG_KG_CHUNK_TOKEN_SIZE: int = 1200
-    NEXUSRAG_KG_LANGUAGE: str = "Vietnamese"
+    NEXUSRAG_KG_LANGUAGE: str = "English"
     NEXUSRAG_KG_ENTITY_TYPES: list[str] = [
         "Organization", "Person", "Product", "Location", "Event",
         "Financial_Metric", "Technology", "Date", "Regulation",
@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     NEXUSRAG_DOCLING_IMAGES_SCALE: float = 2.0
     NEXUSRAG_MAX_IMAGES_PER_DOC: int = 50
     NEXUSRAG_ENABLE_FORMULA_ENRICHMENT: bool = True
+
+    # Processing timeout (minutes) — stale documents auto-recover to FAILED
+    NEXUSRAG_PROCESSING_TIMEOUT_MINUTES: int = 10
+
+    # Pre-ingestion Deduplication
+    NEXUSRAG_DEDUP_ENABLED: bool = True
+    NEXUSRAG_DEDUP_MIN_CHUNK_LENGTH: int = 50       # min meaningful chars
+    NEXUSRAG_DEDUP_NEAR_THRESHOLD: float = 0.85     # Jaccard similarity cutoff
 
     # NexusRAG Retrieval Quality
     NEXUSRAG_EMBEDDING_MODEL: str = "BAAI/bge-m3"

@@ -27,6 +27,7 @@ from app.services.vector_store import VectorStore, get_vector_store
 from app.services.reranker import get_reranker_service
 from app.services.rag_service import RAGQueryResult, RetrievedChunk
 from app.services.models.parsed_document import DeepRetrievalResult
+from app.services.chunk_dedup import deduplicate_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,13 @@ class NexusRAGService:
       - query_deep()  — full async hybrid retrieval (KG + vector + images)
     """
 
-    def __init__(self, db: AsyncSession, workspace_id: int):
+    def __init__(
+        self,
+        db: AsyncSession,
+        workspace_id: int,
+        kg_language: str | None = None,
+        kg_entity_types: list[str] | None = None,
+    ):
         self.db = db
         self.workspace_id = workspace_id
 
@@ -57,7 +64,11 @@ class NexusRAGService:
         # KG service (optional, gated by config)
         self.kg_service: Optional[KnowledgeGraphService] = None
         if settings.NEXUSRAG_ENABLE_KG:
-            self.kg_service = KnowledgeGraphService(workspace_id=workspace_id)
+            self.kg_service = KnowledgeGraphService(
+                workspace_id=workspace_id,
+                kg_language=kg_language,
+                kg_entity_types=kg_entity_types,
+            )
 
         # Retriever (with cross-encoder reranker)
         self.retriever = DeepRetriever(
@@ -152,6 +163,18 @@ class NexusRAGService:
                 self.db.add(db_table)
             if parsed.tables:
                 await self.db.commit()
+
+            # Phase 1.5: PRE-INGESTION DEDUP
+            if parsed.chunks:
+                parsed.chunks, dedup_stats = deduplicate_chunks(parsed.chunks)
+                if dedup_stats["input"] != dedup_stats["output"]:
+                    logger.info(
+                        f"Dedup for doc {document_id}: "
+                        f"{dedup_stats['input']}→{dedup_stats['output']} chunks "
+                        f"(noise={dedup_stats['noise_removed']}, "
+                        f"exact={dedup_stats['exact_removed']}, "
+                        f"near={dedup_stats['near_removed']})"
+                    )
 
             # Phase 2: INDEXING
             document.status = DocumentStatus.INDEXING

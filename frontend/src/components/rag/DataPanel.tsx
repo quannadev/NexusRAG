@@ -10,6 +10,7 @@ import {
   X,
   Loader2,
   Sparkles,
+  Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,9 +19,10 @@ import { StatsBar } from "./StatsBar";
 import { DocumentFilters, type FilterStatus } from "./DocumentFilters";
 import { DocumentCard } from "./DocumentCard";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { WorkspaceSettings } from "./WorkspaceSettings";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { Document, RAGStats, DocumentStatus } from "@/types";
+import type { Document, RAGStats, DocumentStatus, KnowledgeBase, UpdateWorkspace } from "@/types";
 
 const PROCESSING_STATUSES = new Set<DocumentStatus>([
   "parsing",
@@ -30,7 +32,7 @@ const PROCESSING_STATUSES = new Set<DocumentStatus>([
 const PROCESSABLE_STATUSES = new Set<DocumentStatus>(["pending", "failed"]);
 
 interface DataPanelProps {
-  workspace: { id: number; name: string; description?: string | null } | undefined;
+  workspace: KnowledgeBase | undefined;
   documents: Document[] | undefined;
   docsLoading: boolean;
   ragStats: RAGStats | undefined;
@@ -42,7 +44,7 @@ interface DataPanelProps {
   onProcess: (id: number) => void;
   onReindex: (id: number) => void;
   isProcessing: boolean;
-  onUpdateWorkspace: (data: { name: string; description?: string }) => Promise<void>;
+  onUpdateWorkspace: (data: UpdateWorkspace) => Promise<void>;
 }
 
 export const DataPanel = memo(function DataPanel({
@@ -68,6 +70,7 @@ export const DataPanel = memo(function DataPanel({
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [batchProcessing, setBatchProcessing] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const processingCount = useMemo(
     () => documents?.filter((d) => PROCESSING_STATUSES.has(d.status)).length ?? 0,
@@ -198,6 +201,15 @@ export const DataPanel = memo(function DataPanel({
             <Button
               size="icon"
               variant="ghost"
+              onClick={() => setSettingsOpen(true)}
+              className="h-6 w-6 flex-shrink-0"
+              title="Workspace settings"
+            >
+              <Settings2 className="w-3 h-3" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
               onClick={handleStartEdit}
               className="h-6 w-6 flex-shrink-0"
             >
@@ -299,6 +311,16 @@ export const DataPanel = memo(function DataPanel({
           </>
         )}
       </div>
+
+      {/* Workspace settings overlay */}
+      {workspace && (
+        <WorkspaceSettings
+          workspace={workspace}
+          onSave={onUpdateWorkspace}
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       {/* Delete confirmation */}
       <ConfirmDialog

@@ -6,6 +6,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { generateId } from "@/lib/utils";
 import type {
   ChatSourceChunk,
   ChatImageRef,
@@ -57,7 +58,7 @@ function createStep(
   status: "active" | "completed" | "error" = "active",
 ): AgentStep {
   return {
-    id: crypto.randomUUID(),
+    id: generateId(),
     step,
     detail,
     status,
@@ -417,7 +418,7 @@ export function useRAGChatStream(workspaceId: string): RAGStreamResult {
                     ]);
 
                     finalMessage = {
-                      id: crypto.randomUUID(),
+                      id: generateId(),
                       role: "assistant",
                       content: data.answer || "",
                       sources: data.sources || [],

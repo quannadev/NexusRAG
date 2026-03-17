@@ -199,10 +199,21 @@ async def process_document(
         raise NotFoundError("Document", document_id)
 
     if document.status in (DocumentStatus.PROCESSING, DocumentStatus.PARSING, DocumentStatus.INDEXING):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Document is already being processed"
-        )
+        # Check if stale (exceeded processing timeout) — auto-recover
+        from datetime import datetime, timedelta
+        from app.core.config import settings
+        timeout = settings.NEXUSRAG_PROCESSING_TIMEOUT_MINUTES
+        cutoff = datetime.utcnow() - timedelta(minutes=timeout)
+        if document.updated_at < cutoff:
+            # Stale — reset to allow re-processing
+            document.status = DocumentStatus.FAILED
+            document.error_message = f"Processing timeout ({timeout}min). Retrying..."
+            await db.commit()
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document is already being analyzed"
+            )
 
     if document.status == DocumentStatus.INDEXED:
         return DocumentProcessResponse(

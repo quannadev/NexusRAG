@@ -234,12 +234,22 @@ class RAGService:
         return self.vector_store.count()
 
 
-def get_rag_service(db: AsyncSession, workspace_id: int) -> "RAGService | NexusRAGService":
+def get_rag_service(
+    db: AsyncSession,
+    workspace_id: int,
+    kg_language: str | None = None,
+    kg_entity_types: list[str] | None = None,
+) -> "RAGService | NexusRAGService":
     """Factory function: routes to NexusRAGService or legacy RAGService based on config."""
     from app.core.config import settings
 
     if settings.NEXUSRAG_ENABLED:
         from app.services.nexus_rag_service import NexusRAGService
-        return NexusRAGService(db=db, workspace_id=workspace_id)
+        return NexusRAGService(
+            db=db,
+            workspace_id=workspace_id,
+            kg_language=kg_language,
+            kg_entity_types=kg_entity_types,
+        )
 
     return RAGService(db=db, workspace_id=workspace_id)

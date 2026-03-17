@@ -113,6 +113,21 @@ export const DocumentCard = memo(function DocumentCard({
 
   const isActive = doc.status === "parsing" || doc.status === "indexing" || doc.status === "processing";
 
+  // Elapsed time for active processing
+  const [elapsed, setElapsed] = useState("");
+  useEffect(() => {
+    if (!isActive) { setElapsed(""); return; }
+    const start = new Date(doc.updated_at).getTime();
+    const tick = () => {
+      const sec = Math.floor((Date.now() - start) / 1000);
+      if (sec < 60) setElapsed(`${sec}s`);
+      else setElapsed(`${Math.floor(sec / 60)}m ${sec % 60}s`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isActive, doc.updated_at]);
+
   // Flash animation when user just clicked "Analyze"
   const [justTriggered, setJustTriggered] = useState(false);
   useEffect(() => {
@@ -184,7 +199,7 @@ export const DocumentCard = memo(function DocumentCard({
             )}
             {isActive && (
               <span className="text-xs text-blue-400/80 font-medium animate-pulse">
-                Analyzing document...
+                Analyzing{elapsed ? ` (${elapsed})` : "..."}
               </span>
             )}
           </div>

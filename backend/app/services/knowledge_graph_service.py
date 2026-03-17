@@ -79,11 +79,19 @@ class KnowledgeGraphService:
     Each knowledge base gets its own working directory.
     """
 
-    def __init__(self, workspace_id: int):
+    def __init__(
+        self,
+        workspace_id: int,
+        kg_language: str | None = None,
+        kg_entity_types: list[str] | None = None,
+    ):
         self.workspace_id = workspace_id
         self.working_dir = str(
             settings.BASE_DIR / "data" / "lightrag" / f"kb_{workspace_id}"
         )
+        # Per-workspace overrides (fallback to global settings)
+        self.kg_language = kg_language or settings.NEXUSRAG_KG_LANGUAGE
+        self.kg_entity_types = kg_entity_types or settings.NEXUSRAG_KG_ENTITY_TYPES
         self._rag = None
         self._initialized = False
 
@@ -130,8 +138,8 @@ class KnowledgeGraphService:
             graph_storage="NetworkXStorage",
             doc_status_storage="JsonDocStatusStorage",
             addon_params={
-                "language": settings.NEXUSRAG_KG_LANGUAGE,
-                "entity_types": settings.NEXUSRAG_KG_ENTITY_TYPES,
+                "language": self.kg_language,
+                "entity_types": self.kg_entity_types,
             },
         )
 

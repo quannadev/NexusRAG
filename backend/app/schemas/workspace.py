@@ -8,12 +8,16 @@ from datetime import datetime
 class WorkspaceCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
+    kg_language: str | None = None
+    kg_entity_types: list[str] | None = None
 
 
 class WorkspaceUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     system_prompt: str | None = None
+    kg_language: str | None = None
+    kg_entity_types: list[str] | None = None
 
 
 class WorkspaceResponse(BaseModel):
@@ -21,6 +25,8 @@ class WorkspaceResponse(BaseModel):
     name: str
     description: str | None
     system_prompt: str | None = None
+    kg_language: str | None = None
+    kg_entity_types: list[str] | None = None
     document_count: int = 0
     indexed_count: int = 0
     created_at: datetime

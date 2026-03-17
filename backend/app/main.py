@@ -10,7 +10,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import logging
 
-from sqlalchemy import text
+from datetime import datetime, timedelta
+
+from sqlalchemy import text, update
 
 from app.core.config import settings
 from app.core.database import engine, Base
@@ -58,7 +60,43 @@ async def lifespan(app: FastAPI):
             await conn.execute(text(
                 "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS agent_steps JSON"
             ))
+            # Auto-migrate: add workspace settings columns
+            await conn.execute(
+                text("ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS kg_language VARCHAR(50)")
+            )
+            await conn.execute(
+                text("ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS kg_entity_types JSON")
+            )
         logger.info("Database tables created/verified")
+
+        # Recover stale processing documents (stuck from previous runs)
+        from app.models.document import Document, DocumentStatus
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from sqlalchemy import select as sa_select
+        async with AsyncSession(engine) as session:
+            timeout = settings.NEXUSRAG_PROCESSING_TIMEOUT_MINUTES
+            cutoff = datetime.utcnow() - timedelta(minutes=timeout)
+            stale_statuses = [
+                DocumentStatus.PROCESSING,
+                DocumentStatus.PARSING,
+                DocumentStatus.INDEXING,
+            ]
+            result = await session.execute(
+                update(Document)
+                .where(
+                    Document.status.in_(stale_statuses),
+                    Document.updated_at < cutoff,
+                )
+                .values(
+                    status=DocumentStatus.FAILED,
+                    error_message=f"Processing timeout ({timeout}min). Click Analyze to retry.",
+                )
+                .returning(Document.id)
+            )
+            stale_ids = [row[0] for row in result.fetchall()]
+            if stale_ids:
+                await session.commit()
+                logger.warning(f"Recovered {len(stale_ids)} stale documents: {stale_ids}")
     else:
         logger.info("AUTO_CREATE_TABLES=false — skipping auto-migration")
     yield

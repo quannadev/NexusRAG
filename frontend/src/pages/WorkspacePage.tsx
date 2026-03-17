@@ -8,7 +8,7 @@ import { VisualPanel } from "@/components/rag/VisualPanel";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useWorkspace, useUpdateWorkspace } from "@/hooks/useWorkspaces";
 import { api } from "@/lib/api";
-import type { Document, RAGStats, DocumentStatus } from "@/types";
+import type { Document, RAGStats, DocumentStatus, UpdateWorkspace } from "@/types";
 
 const PROCESSING_STATUSES = new Set<DocumentStatus>([
   "parsing",
@@ -120,7 +120,17 @@ export function WorkspacePage() {
         description: "Parsing content and building search index.",
       });
     },
-    onError: () => toast.error("Failed to start analysis"),
+    onError: (error: Error) => {
+      if (error.message?.includes("already being analyzed")) {
+        toast.info("Document is already being analyzed", {
+          description: "Please wait for the current analysis to complete.",
+        });
+        // Refresh to get latest status
+        queryClient.invalidateQueries({ queryKey: ["documents", workspaceId] });
+      } else {
+        toast.error("Failed to start analysis");
+      }
+    },
   });
 
   const reindexDoc = useMutation({
@@ -149,7 +159,7 @@ export function WorkspacePage() {
   );
 
   const handleUpdateWorkspace = useCallback(
-    async (data: { name: string; description?: string }) => {
+    async (data: UpdateWorkspace) => {
       if (!wsId) return;
       await updateWorkspace.mutateAsync({ id: wsId, data });
     },
