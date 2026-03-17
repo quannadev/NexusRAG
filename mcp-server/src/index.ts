@@ -20,7 +20,7 @@ const server = new McpServer({
 server.registerTool(
   "get_workspace_list",
   {
-    description: "List all knowledge bases / workspaces available in NexusRAG.",
+    description: "Retrieve a complete list of all active workspaces (knowledge bases) available in NexusRAG. Use this to find the correct `workspace_id` needed for querying documents or understanding the available context domains.",
   },
   async () => {
     try {
@@ -50,7 +50,7 @@ server.registerTool(
 server.registerTool(
   "get_document_by_id",
   {
-    description: "Get details for a specific document by its ID.",
+    description: "Fetch the full metadata and processing state of a specific indexed document using its unique `document_id`. Use this when you need to know a document's status, filename, source, or parsing results.",
     inputSchema: {
       document_id: z.number().describe("The ID of the document to retrieve."),
     },
@@ -84,12 +84,12 @@ server.registerTool(
 server.registerTool(
   "query",
   {
-    description: "Query indexed documents using semantic search in a specific workspace.",
+    description: "Perform a semantic or hybrid search against the Vector Database for a given `workspace_id`. Use this tool to reliably find relevant context or exact answers to user questions from the indexed knowledge base.",
     inputSchema: {
-      workspace_id: z.number().describe("The ID of the workspace to query."),
-      question: z.string().describe("The question to query."),
-      top_k: z.number().optional().describe("Number of chunks to retrieve (default: 5)."),
-      mode: z.string().optional().describe("Search mode: hybrid (default), vector_only, naive, local, global"),
+      workspace_id: z.number().describe("The ID of the workspace to query. (Find this using get_workspace_list)"),
+      question: z.string().describe("The search query or question to send to the vector database."),
+      top_k: z.number().optional().describe("Number of context chunks to retrieve (default: 5). Increase this if more context is needed."),
+      mode: z.string().optional().describe("Search mode: 'hybrid' (default, recommended), 'vector_only', 'naive', 'local', 'global'"),
     },
   },
   async ({ workspace_id, question, top_k = 5, mode = "hybrid" }) => {
@@ -115,6 +115,41 @@ server.registerTool(
             type: "text",
             text: `Query failed for workspace ${workspace_id}: ${error.response?.data?.detail || error.message
               }`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "get_chunks",
+  {
+    description: "Retrieve the raw text chunks that were extracted from a specific document during ingestion. Use this when you have a `document_id` and need to read the actual extracted text contents of that document in manageable sequences.",
+    inputSchema: {
+      document_id: z.number().describe("The ID of the document to get chunks for."),
+    },
+  },
+  async ({ document_id }) => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/rag/chunks/${document_id}`);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(response.data, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Failed to fetch chunks for document ${document_id}: ${
+              error.response?.data?.detail || error.message
+            }`,
           },
         ],
         isError: true,
