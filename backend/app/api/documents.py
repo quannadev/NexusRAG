@@ -135,13 +135,19 @@ async def upload_document(
     parsed_metadata = None
     if custom_metadata:
         try:
-            parsed_metadata = json.loads(custom_metadata)
-            if not isinstance(parsed_metadata, dict):
-                raise ValueError("Metadata must be a JSON object")
+            raw_metadata = json.loads(custom_metadata)
+            if not isinstance(raw_metadata, list):
+                raise ValueError("Metadata must be a list of key-value objects")
+            
+            parsed_metadata = {}
+            for item in raw_metadata:
+                if not isinstance(item, dict) or "key" not in item or "value" not in item:
+                    raise ValueError("Each metadata item must contain 'key' and 'value' fields")
+                parsed_metadata[item["key"]] = item["value"]
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid custom_metadata JSON: {e}"
+                detail=f"Invalid custom_metadata format: {e}"
             )
             
     result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == workspace_id))
