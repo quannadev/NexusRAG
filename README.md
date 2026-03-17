@@ -436,6 +436,12 @@ All endpoints prefixed with `/api/v1`. Interactive docs at http://localhost:8080
 
 ---
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/image?repos=LeDat98/NexusRAG&type=timeline&legend=top-left)](https://www.star-history.com/?repos=LeDat98%2FNexusRAG&type=timeline&legend=top-left)
+
+---
+
 <div align="center">
 
 ⭐ If you find NexusRAG useful, please consider giving it a **star** — it helps others discover the project and motivates continued development!
