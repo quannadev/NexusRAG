@@ -652,7 +652,10 @@ class DeepDocumentParser:
             "- Write 2-4 concise sentences, max 400 characters.\n"
             "- Do NOT start with 'This image shows' or 'Here is'.\n"
             "- Do NOT add any data, context, or interpretation beyond what is visible.\n"
-            "- If text in the image is not clearly readable, say so."
+            "- If text in the image is not clearly readable, say so.\n"
+            "- Write in the SAME LANGUAGE as any text visible in the image. "
+            "If the text is in Vietnamese, write in Vietnamese. "
+            "If in English, write in English."
         )
 
         for img in images:
