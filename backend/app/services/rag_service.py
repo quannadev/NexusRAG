@@ -94,21 +94,61 @@ class RAGService:
             document.status = DocumentStatus.PROCESSING
             await self.db.commit()
 
-            # Load document
-            logger.info(f"Loading document {document_id} from {file_path}")
-            loaded = load_document(file_path)
+            import asyncio
 
-            # Chunk text
-            logger.info(f"Chunking document {document_id}")
-            chunks = self.chunker.split_text(
-                text=loaded.content,
-                source=document.original_filename,
-                extra_metadata={
-                    "document_id": document_id,
-                    "file_type": loaded.file_type,
-                    "page_count": loaded.page_count
-                }
-            )
+            def _process_sync():
+                # Load document
+                logger.info(f"Loading document {document_id} from {file_path}")
+                loaded = load_document(file_path)
+
+                # Chunk text
+                logger.info(f"Chunking document {document_id}")
+                chunks = self.chunker.split_text(
+                    text=loaded.content,
+                    source=document.original_filename,
+                    extra_metadata={
+                        "document_id": document_id,
+                        "file_type": loaded.file_type,
+                        "page_count": loaded.page_count
+                    }
+                )
+
+                if not chunks:
+                    return []
+
+                # Generate embeddings
+                logger.info(f"Generating embeddings for {len(chunks)} chunks")
+                chunk_texts = [c.content for c in chunks]
+                embeddings = self.embedder.embed_texts(chunk_texts)
+
+                # Prepare data for vector store
+                ids = [f"doc_{document_id}_chunk_{i}" for i in range(len(chunks))]
+                metadatas = []
+                for c in chunks:
+                    meta = {
+                        "document_id": document_id,
+                        "chunk_index": c.chunk_index,
+                        "char_start": c.char_start,
+                        "char_end": c.char_end,
+                        "source": c.metadata.get("source", ""),
+                        "file_type": c.metadata.get("file_type", "")
+                    }
+                    if document.custom_metadata:
+                        meta.update(document.custom_metadata)
+                    metadatas.append(meta)
+
+                # Store in vector database
+                logger.info(f"Storing {len(chunks)} chunks in vector store")
+                self.vector_store.add_documents(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=chunk_texts,
+                    metadatas=metadatas
+                )
+                return chunks
+
+            # Run the synchronous CPU/IO blocking code in a thread pool
+            chunks = await asyncio.to_thread(_process_sync)
 
             if not chunks:
                 document.status = DocumentStatus.INDEXED
@@ -117,35 +157,6 @@ class RAGService:
                 logger.warning(f"Document {document_id} produced no chunks (empty content)")
                 return 0
 
-            # Generate embeddings
-            logger.info(f"Generating embeddings for {len(chunks)} chunks")
-            chunk_texts = [c.content for c in chunks]
-            embeddings = self.embedder.embed_texts(chunk_texts)
-
-            # Prepare data for vector store
-            ids = [f"doc_{document_id}_chunk_{i}" for i in range(len(chunks))]
-            metadatas = []
-            for c in chunks:
-                meta = {
-                    "document_id": document_id,
-                    "chunk_index": c.chunk_index,
-                    "char_start": c.char_start,
-                    "char_end": c.char_end,
-                    "source": c.metadata.get("source", ""),
-                    "file_type": c.metadata.get("file_type", "")
-                }
-                if document.custom_metadata:
-                    meta.update(document.custom_metadata)
-                metadatas.append(meta)
-
-            # Store in vector database
-            logger.info(f"Storing {len(chunks)} chunks in vector store")
-            self.vector_store.add_documents(
-                ids=ids,
-                embeddings=embeddings,
-                documents=chunk_texts,
-                metadatas=metadatas
-            )
 
             # Update document status
             document.status = DocumentStatus.INDEXED
