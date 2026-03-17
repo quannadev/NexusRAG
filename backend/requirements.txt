@@ -13,6 +13,7 @@ alembic>=1.12.0
 
 # Vector store
 chromadb>=0.4.22
+pgvector>=0.2.4
 
 # Embeddings & reranking
 sentence-transformers>=2.2.2

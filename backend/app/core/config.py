@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     KG_EMBEDDING_MODEL: str = Field(default="gemini-embedding-001")
     KG_EMBEDDING_DIMENSION: int = Field(default=3072)
 
+    # Vector Storage
+    VECTOR_DB_PROVIDER: str = Field(default="chroma")
+
     # ChromaDB
     CHROMA_HOST: str = Field(default="localhost")
     CHROMA_PORT: int = Field(default=8002)

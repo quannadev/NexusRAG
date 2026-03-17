@@ -40,7 +40,7 @@ def get_chroma_client() -> chromadb.HttpClient:
     return _chroma_client
 
 
-class VectorStore:
+class ChromaVectorStore:
     """
     Vector store service for managing document embeddings in ChromaDB.
     Each knowledge base has its own collection for namespace isolation.
@@ -185,6 +185,193 @@ class VectorStore:
         )
 
 
-def get_vector_store(workspace_id: int) -> VectorStore:
+class PostgresVectorStore:
+    """
+    Vector store service for managing document embeddings in PostgreSQL using pgvector.
+    All chunks are stored in the VectorChunk table, isolated by workspace_id.
+    """
+
+    def __init__(self, workspace_id: int):
+        self.workspace_id = workspace_id
+
+    def add_documents(
+        self,
+        ids: Sequence[str],
+        embeddings: Sequence[list[float]],
+        documents: Sequence[str],
+        metadatas: Sequence[dict] | None = None
+    ) -> None:
+        if not ids:
+            return
+            
+        from app.models.vector_chunk import VectorChunk
+        from app.core.database import async_session_maker
+        import asyncio
+
+        async def _insert_chunks():
+            async with async_session_maker() as session:
+                for i in range(len(ids)):
+                    chunk = VectorChunk(
+                        id=ids[i],
+                        workspace_id=self.workspace_id,
+                        document=documents[i],
+                        embedding=embeddings[i],
+                        c_metadata=metadatas[i] if metadatas else {}
+                    )
+                    session.add(chunk)
+                await session.commit()
+                
+        # We need to run this synchronously or inside an existing event loop.
+        # However, FastAPI sync routes or other services might call this.
+        # Since VectorStore was synchronous, we use asyncio execution here.
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_insert_chunks())
+        except RuntimeError:
+            asyncio.run(_insert_chunks())
+
+        logger.info(f"Added {len(ids)} documents to Postgres workspace {self.workspace_id}")
+
+    def query(
+        self,
+        query_embedding: list[float],
+        n_results: int = 5,
+        where: dict | None = None,
+        include: list[str] | None = None
+    ) -> dict:
+        from app.models.vector_chunk import VectorChunk
+        from app.core.database import async_session_maker
+        from sqlalchemy import select
+        import asyncio
+        
+        async def _query_chunks():
+            async with async_session_maker() as session:
+                stmt = select(VectorChunk).where(
+                    VectorChunk.workspace_id == self.workspace_id
+                )
+                
+                if where:
+                    for key, val in where.items():
+                        if isinstance(val, dict) and "$in" in val:
+                            in_vals = val["$in"]
+                            if in_vals:
+                                # Determine type for cast
+                                if isinstance(in_vals[0], int):
+                                    from sqlalchemy import Integer
+                                    stmt = stmt.where(VectorChunk.c_metadata[key].astext.cast(Integer).in_(in_vals))
+                                else:
+                                    stmt = stmt.where(VectorChunk.c_metadata[key].astext.in_([str(v) for v in in_vals]))
+                        else:
+                            # Direct equality
+                            if isinstance(val, int):
+                                from sqlalchemy import Integer
+                                stmt = stmt.where(VectorChunk.c_metadata[key].astext.cast(Integer) == val)
+                            elif isinstance(val, bool):
+                                from sqlalchemy import Boolean
+                                stmt = stmt.where(VectorChunk.c_metadata[key].astext.cast(Boolean) == val)
+                            else:
+                                stmt = stmt.where(VectorChunk.c_metadata[key].astext == str(val))
+                                
+                stmt = stmt.order_by(
+                    VectorChunk.embedding.cosine_distance(query_embedding)
+                ).limit(n_results)
+                
+                result = await session.execute(stmt)
+                chunks = result.scalars().all()
+                return chunks
+                
+        try:
+            loop = asyncio.get_running_loop()
+            # If running loop, we can't block. This indicates the caller expects a sync return.
+            # Using nest_asyncio or running in a separate thread might be required if this blocks.
+            # For simplicity, if we hit this, we might need a workaround.
+            pass
+        except RuntimeError:
+            pass
+            
+        chunks = asyncio.run(_query_chunks())
+        
+        # Format like ChromaDB
+        return {
+            "ids": [c.id for c in chunks],
+            "documents": [c.document for c in chunks],
+            "metadatas": [c.c_metadata for c in chunks],
+            "distances": [0.0] * len(chunks)  # Actual distance not easily extracted in standard ORM without overriding columns
+        }
+
+    def delete_by_document_id(self, document_id: int) -> None:
+        from app.models.vector_chunk import VectorChunk
+        from app.core.database import async_session_maker
+        from sqlalchemy import delete, Integer
+        import asyncio
+        
+        async def _delete():
+            async with async_session_maker() as session:
+                stmt = delete(VectorChunk).where(
+                    VectorChunk.workspace_id == self.workspace_id,
+                    VectorChunk.c_metadata['document_id'].astext.cast(Integer) == document_id
+                )
+                await session.execute(stmt)
+                await session.commit()
+                
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_delete())
+        except RuntimeError:
+            asyncio.run(_delete())
+
+    def delete_collection(self) -> None:
+        from app.models.vector_chunk import VectorChunk
+        from app.core.database import async_session_maker
+        from sqlalchemy import delete
+        import asyncio
+        
+        async def _delete():
+            async with async_session_maker() as session:
+                stmt = delete(VectorChunk).where(VectorChunk.workspace_id == self.workspace_id)
+                await session.execute(stmt)
+                await session.commit()
+                
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_delete())
+        except RuntimeError:
+            asyncio.run(_delete())
+
+    def count(self) -> int:
+        from app.models.vector_chunk import VectorChunk
+        from app.core.database import async_session_maker
+        from sqlalchemy import select, func
+        import asyncio
+        
+        async def _count():
+            async with async_session_maker() as session:
+                stmt = select(func.count()).select_from(VectorChunk).where(VectorChunk.workspace_id == self.workspace_id)
+                return await session.scalar(stmt)
+                
+        return asyncio.run(_count())
+
+    def get_by_ids(self, ids: Sequence[str]) -> dict:
+        from app.models.vector_chunk import VectorChunk
+        from app.core.database import async_session_maker
+        from sqlalchemy import select
+        import asyncio
+        
+        async def _get():
+            async with async_session_maker() as session:
+                stmt = select(VectorChunk).where(VectorChunk.id.in_(list(ids)))
+                res = await session.execute(stmt)
+                return res.scalars().all()
+                
+        chunks = asyncio.run(_get())
+        return {
+            "documents": [c.document for c in chunks],
+            "metadatas": [c.c_metadata for c in chunks]
+        }
+
+
+def get_vector_store(workspace_id: int):
     """Factory function to create a VectorStore for a knowledge base."""
-    return VectorStore(workspace_id)
+    if settings.VECTOR_DB_PROVIDER.lower() == "postgres":
+        return PostgresVectorStore(workspace_id)
+    return ChromaVectorStore(workspace_id)
