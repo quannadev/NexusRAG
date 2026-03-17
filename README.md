@@ -79,7 +79,7 @@ NexusRAG uses [Docling](https://github.com/docling-project/docling) for structur
 |---|---|---|
 | **Vector Embedding** | BAAI/bge-m3 | 1024-dim multilingual bi-encoder (100+ languages) |
 | **KG Embedding** | Gemini / Ollama / sentence-transformers | Configurable: Gemini (3072d), Ollama, or local sentence-transformers (e.g. bge-m3 1024d) |
-| **Vector Search** | ChromaDB | Cosine similarity, over-fetch top-20 candidates |
+| **Vector Search** | PostgreSQL (pgvector) | Cosine similarity, over-fetch top-20 candidates (ChromaDB available as fallback) |
 | **Knowledge Graph** | LightRAG | Entity/relationship extraction, keyword-to-entity matching |
 | **Reranking** | BAAI/bge-reranker-v2-m3 | Cross-encoder joint scoring — encodes (query, chunk) pairs together |
 | **Generation** | Gemini / Ollama | Agentic streaming chat with function calling |
@@ -256,7 +256,7 @@ The chat system uses a semi-agentic architecture with real-time SSE streaming:
 <details>
 <summary><b>Workspace System</b></summary>
 
-- Multiple isolated knowledge bases, each with its own documents, ChromaDB collection, and KG
+- Multiple isolated knowledge bases, each with its own documents, pgvector collection, and KG
 - Custom system prompt per workspace (override default Q&A behavior)
 - Independent chat history with message persistence and ratings
 
@@ -359,7 +359,7 @@ Goal: compare cost-efficiency (local 4B/9B) vs cloud quality across faithfulness
 |---|---|
 | **FastAPI** | Async web framework with SSE streaming |
 | **SQLAlchemy 2.0** | Async ORM with PostgreSQL (asyncpg) |
-| **ChromaDB** | Vector store — cosine similarity, per-workspace collections |
+| **PostgreSQL (pgvector)** | Primary vector store — cosine similarity, per-workspace collections (ChromaDB supported) |
 | **LightRAG** | Knowledge graph — entity extraction, multi-hop queries |
 | **Docling** | Document parsing — PDF, DOCX, PPTX, HTML with structural extraction |
 | **sentence-transformers** | BAAI/bge-m3 embeddings + BAAI/bge-reranker-v2-m3 reranking |
@@ -390,7 +390,7 @@ Goal: compare cost-efficiency (local 4B/9B) vs cloud quality across faithfulness
 | Technology | Purpose |
 |---|---|
 | **PostgreSQL 15** | Document metadata, chat history, workspace config |
-| **ChromaDB** | Vector embeddings (HTTP client, containerized) |
+| **PostgreSQL (pgvector)** | Vector embeddings containerized (ChromaDB supported) |
 | **LightRAG** | File-based KG (NetworkX + NanoVectorDB — no extra services) |
 | **Docker Compose** | Full-stack deployment (4 containers) |
 | **nginx** | Production frontend serving + API/SSE reverse proxy |
@@ -421,7 +421,7 @@ cd NexusRAG
 ./setup.sh
 ```
 
-The script checks prerequisites, creates venv, installs deps, starts PostgreSQL + ChromaDB, and optionally downloads ML models.
+The script checks prerequisites, creates venv, installs deps, starts PostgreSQL (Main + Vector DB), and optionally downloads ML models.
 
 ```bash
 # Terminal 1 — Backend (port 8080)
@@ -481,6 +481,13 @@ cp .env.example .env
 | `KG_EMBEDDING_PROVIDER` | `gemini` | `gemini`, `ollama`, or `sentence_transformers` |
 | `KG_EMBEDDING_MODEL` | `text-embedding-004` | Model name (provider-specific) |
 | `KG_EMBEDDING_DIMENSION` | `3072` | Embedding dimension (must match model) |
+
+### Vector Database
+
+| Variable | Default | Description |
+|---|---|---|
+| `VECTOR_DB_PROVIDER` | `postgres` | `postgres` or `chroma` |
+| `VECTOR_DB_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5433/vectordb` | Connection URL for Vector DB |
 
 ### RAG Pipeline
 
