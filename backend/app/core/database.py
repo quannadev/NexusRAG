@@ -24,6 +24,25 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
+class VectorBase(DeclarativeBase):
+    pass
+
+vector_engine = create_async_engine(
+    settings.VECTOR_DB_URL,
+    echo=settings.DEBUG,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+)
+
+VectorAsyncSessionLocal = async_sessionmaker(
+    vector_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
 # Alias for background tasks
 async_session_maker = AsyncSessionLocal
 

@@ -6,9 +6,10 @@ import uuid
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Form
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+import json
 from sqlalchemy import select
 
 from app.core.config import settings
@@ -126,9 +127,23 @@ async def process_document_background(document_id: int, file_path: str, workspac
 async def upload_document(
     workspace_id: int,
     file: UploadFile = File(...),
+    custom_metadata: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a document to a knowledge base. Processing must be triggered separately."""
+    
+    parsed_metadata = None
+    if custom_metadata:
+        try:
+            parsed_metadata = json.loads(custom_metadata)
+            if not isinstance(parsed_metadata, dict):
+                raise ValueError("Metadata must be a JSON object")
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid custom_metadata JSON: {e}"
+            )
+            
     result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == workspace_id))
     kb = result.scalar_one_or_none()
 
@@ -162,6 +177,7 @@ async def upload_document(
         file_type=ext[1:],
         file_size=len(content),
         status=DocumentStatus.PENDING,
+        custom_metadata=parsed_metadata,
     )
     db.add(document)
     await db.commit()

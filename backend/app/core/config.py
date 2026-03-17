@@ -48,9 +48,10 @@ class Settings(BaseSettings):
     KG_EMBEDDING_DIMENSION: int = Field(default=3072)
 
     # Vector Storage
-    VECTOR_DB_PROVIDER: str = Field(default="chroma")
+    VECTOR_DB_PROVIDER: str = Field(default="postgres")
+    VECTOR_DB_URL: str = Field(default="postgresql+asyncpg://postgres:postgres@localhost:5434/vectordb")
 
-    # ChromaDB
+    # ChromaDB (legacy)
     CHROMA_HOST: str = Field(default="localhost")
     CHROMA_PORT: int = Field(default=8002)
 

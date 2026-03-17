@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import text, update
 
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, vector_engine, VectorBase
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,8 +28,6 @@ async def lifespan(app: FastAPI):
     auto_create = os.environ.get("AUTO_CREATE_TABLES", "true").lower() == "true"
     if auto_create:
         async with engine.begin() as conn:
-            # Create vector extension before tables 
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all)
             # Auto-migrate: add new columns if missing
             await conn.execute(
@@ -69,6 +67,16 @@ async def lifespan(app: FastAPI):
             await conn.execute(
                 text("ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS kg_entity_types JSON")
             )
+            await conn.execute(
+                text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS custom_metadata JSON")
+            )
+
+        if settings.VECTOR_DB_PROVIDER == "postgres":
+            from app.models.vector_chunk import VectorChunk  # ensure it's imported
+            async with vector_engine.begin() as conn:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                await conn.run_sync(VectorBase.metadata.create_all)
+
         logger.info("Database tables created/verified")
 
         # Recover stale processing documents (stuck from previous runs)

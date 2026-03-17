@@ -1,4 +1,4 @@
-# NexusRAG — Dev services only (PostgreSQL + ChromaDB)
+# NexusRAG — Dev services only (PostgreSQL + VectorDB)
 # Usage: docker compose -f docker-compose.services.yml up -d
 
 services:
@@ -19,17 +19,23 @@ services:
       timeout: 5s
       retries: 5
 
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: nexusrag-chromadb
-    ports:
-      - "8002:8000"
-    volumes:
-      - nexusrag_chroma_data:/chroma/chroma
+  vectordb:
+    image: pgvector/pgvector:pg15
+    container_name: nexusrag-vectordb
     environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vectordb
+    ports:
+      - "5434:5432"
+    volumes:
+      - nexusrag_vectordb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   nexusrag_postgres_data:
-  nexusrag_chroma_data:
+  nexusrag_vectordb_data:

@@ -3,7 +3,7 @@
 
 services:
   postgres:
-    image: pgvector/pgvector:pg15
+    image: postgres:15-alpine
     container_name: nexusrag-postgres
     environment:
       POSTGRES_USER: postgres
@@ -19,16 +19,22 @@ services:
       timeout: 5s
       retries: 5
 
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: nexusrag-chromadb
-    ports:
-      - "8002:8000"
-    volumes:
-      - nexusrag_chroma_data:/chroma/chroma
+  vectordb:
+    image: pgvector/pgvector:pg15
+    container_name: nexusrag-vectordb
     environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vectordb
+    ports:
+      - "5434:5432"
+    volumes:
+      - nexusrag_vectordb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   backend:
     build:
@@ -38,14 +44,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      chromadb:
-        condition: service_started
+      vectordb:
+        condition: service_healthy
     env_file: .env
     environment:
       # Override for Docker internal networking
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/nexusrag
-      CHROMA_HOST: chromadb
-      CHROMA_PORT: 8000
+      VECTOR_DB_URL: postgresql+asyncpg://postgres:postgres@vectordb:5432/vectordb
     volumes:
       - nexusrag_uploads:/app/backend/uploads
       - nexusrag_data:/app/backend/data
@@ -73,6 +78,6 @@ services:
 
 volumes:
   nexusrag_postgres_data:
-  nexusrag_chroma_data:
+  nexusrag_vectordb_data:
   nexusrag_uploads:
   nexusrag_data:

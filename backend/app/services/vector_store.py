@@ -205,11 +205,11 @@ class PostgresVectorStore:
             return
             
         from app.models.vector_chunk import VectorChunk
-        from app.core.database import async_session_maker
+        from app.core.database import VectorAsyncSessionLocal
         import asyncio
 
         async def _insert_chunks():
-            async with async_session_maker() as session:
+            async with VectorAsyncSessionLocal() as session:
                 for i in range(len(ids)):
                     chunk = VectorChunk(
                         id=ids[i],
@@ -240,12 +240,12 @@ class PostgresVectorStore:
         include: list[str] | None = None
     ) -> dict:
         from app.models.vector_chunk import VectorChunk
-        from app.core.database import async_session_maker
+        from app.core.database import VectorAsyncSessionLocal
         from sqlalchemy import select
         import asyncio
         
         async def _query_chunks():
-            async with async_session_maker() as session:
+            async with VectorAsyncSessionLocal() as session:
                 stmt = select(VectorChunk).where(
                     VectorChunk.workspace_id == self.workspace_id
                 )
@@ -300,13 +300,14 @@ class PostgresVectorStore:
         }
 
     def delete_by_document_id(self, document_id: int) -> None:
+        """Delete all chunks belonging to a specific document."""
         from app.models.vector_chunk import VectorChunk
-        from app.core.database import async_session_maker
-        from sqlalchemy import delete, Integer
+        from app.core.database import VectorAsyncSessionLocal
+        from sqlalchemy import delete, func, cast, Integer
         import asyncio
         
-        async def _delete():
-            async with async_session_maker() as session:
+        async def _delete_chunks():
+            async with VectorAsyncSessionLocal() as session:
                 stmt = delete(VectorChunk).where(
                     VectorChunk.workspace_id == self.workspace_id,
                     VectorChunk.c_metadata['document_id'].astext.cast(Integer) == document_id
@@ -316,54 +317,57 @@ class PostgresVectorStore:
                 
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(_delete())
+            loop.create_task(_delete_chunks())
         except RuntimeError:
-            asyncio.run(_delete())
+            asyncio.run(_delete_chunks())
 
     def delete_collection(self) -> None:
+        """Delete the entire collection for this knowledge base (all chunks for the workspace)."""
         from app.models.vector_chunk import VectorChunk
-        from app.core.database import async_session_maker
+        from app.core.database import VectorAsyncSessionLocal
         from sqlalchemy import delete
         import asyncio
-        
-        async def _delete():
-            async with async_session_maker() as session:
+
+        async def _delete_all():
+            async with VectorAsyncSessionLocal() as session:
                 stmt = delete(VectorChunk).where(VectorChunk.workspace_id == self.workspace_id)
                 await session.execute(stmt)
                 await session.commit()
                 
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(_delete())
+            loop.create_task(_delete_all())
         except RuntimeError:
-            asyncio.run(_delete())
+            asyncio.run(_delete_all())
 
     def count(self) -> int:
+        """Return the number of documents in the collection (workspace)."""
         from app.models.vector_chunk import VectorChunk
-        from app.core.database import async_session_maker
+        from app.core.database import VectorAsyncSessionLocal
         from sqlalchemy import select, func
         import asyncio
-        
+
         async def _count():
-            async with async_session_maker() as session:
+            async with VectorAsyncSessionLocal() as session:
                 stmt = select(func.count()).select_from(VectorChunk).where(VectorChunk.workspace_id == self.workspace_id)
                 return await session.scalar(stmt)
                 
         return asyncio.run(_count())
 
     def get_by_ids(self, ids: Sequence[str]) -> dict:
+        """Get documents by their IDs."""
         from app.models.vector_chunk import VectorChunk
-        from app.core.database import async_session_maker
+        from app.core.database import VectorAsyncSessionLocal
         from sqlalchemy import select
         import asyncio
-        
-        async def _get():
-            async with async_session_maker() as session:
+
+        async def _get_by_ids():
+            async with VectorAsyncSessionLocal() as session:
                 stmt = select(VectorChunk).where(VectorChunk.id.in_(list(ids)))
                 res = await session.execute(stmt)
                 return res.scalars().all()
                 
-        chunks = asyncio.run(_get())
+        chunks = asyncio.run(_get_by_ids())
         return {
             "documents": [c.document for c in chunks],
             "metadatas": [c.c_metadata for c in chunks]
