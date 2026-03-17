@@ -71,9 +71,8 @@ server.registerTool(
         content: [
           {
             type: "text",
-            text: `Failed to fetch document ${document_id}: ${
-              error.response?.data?.detail || error.message
-            }`,
+            text: `Failed to fetch document ${document_id}: ${error.response?.data?.detail || error.message
+              }`,
           },
         ],
         isError: true,
@@ -114,9 +113,8 @@ server.registerTool(
         content: [
           {
             type: "text",
-            text: `Query failed for workspace ${workspace_id}: ${
-              error.response?.data?.detail || error.message
-            }`,
+            text: `Query failed for workspace ${workspace_id}: ${error.response?.data?.detail || error.message
+              }`,
           },
         ],
         isError: true,
@@ -128,20 +126,20 @@ server.registerTool(
 // Run Server
 async function main() {
   const transportType = process.env.TRANSPORT === "http" ? "http" : "stdio";
-  
+
   if (transportType === "http") {
     const app = createMcpExpressApp();
     const port = process.env.PORT || 8000;
-    
+
     // Store active transports
     const transports: Record<string, StreamableHTTPServerTransport> = {};
-    
+
     // Single endpoint /mcp handles GET, POST, DELETE requests
     app.all("/mcp", async (req, res) => {
       try {
         const sessionId = req.headers["mcp-session-id"] as string;
         let transport: StreamableHTTPServerTransport | undefined;
-        
+
         if (sessionId && transports[sessionId]) {
           transport = transports[sessionId];
         } else if (!sessionId && req.method === "POST" && isInitializeRequest(req.body)) {
@@ -151,14 +149,14 @@ async function main() {
               transports[newSessionId] = transport!;
             }
           });
-          
+
           transport.onclose = () => {
             const sid = transport?.sessionId;
             if (sid && transports[sid]) {
               delete transports[sid];
             }
           };
-          
+
           await server.connect(transport);
         } else {
           res.status(400).json({
@@ -171,7 +169,7 @@ async function main() {
           });
           return;
         }
-        
+
         await transport.handleRequest(req as any, res as any, req.body);
       } catch (error) {
         if (!res.headersSent) {
@@ -190,7 +188,7 @@ async function main() {
     app.listen(port, () => {
       console.log(`NexusRAG MCP server running on Streamable HTTP at http://localhost:${port}/mcp`);
     });
-    
+
     // Cleanup handlers
     process.on("SIGINT", async () => {
       for (const sid in transports) {
