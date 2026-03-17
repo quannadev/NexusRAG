@@ -105,7 +105,9 @@ class NexusRAGService:
             document.status = DocumentStatus.PARSING
             await self.db.commit()
 
-            parsed = self.parser.parse(
+            import asyncio
+            parsed = await asyncio.to_thread(
+                self.parser.parse,
                 file_path=file_path,
                 document_id=document_id,
                 original_filename=document.original_filename,
@@ -182,46 +184,48 @@ class NexusRAGService:
 
             chunk_count = 0
             if parsed.chunks:
-                # Embed and store in ChromaDB
-                chunk_texts = [c.content for c in parsed.chunks]
-                embeddings = self.embedder.embed_texts(chunk_texts)
+                def _index_sync():
+                    # Embed and store in ChromaDB
+                    chunk_texts = [c.content for c in parsed.chunks]
+                    embeddings = self.embedder.embed_texts(chunk_texts)
 
-                ids = [
-                    f"doc_{document_id}_chunk_{i}"
-                    for i in range(len(parsed.chunks))
-                ]
-                # Build image_id→URL lookup for metadata
-                _img_url_map = {
-                    img.image_id: f"/static/doc-images/kb_{self.workspace_id}/images/{img.image_id}.png"
-                    for img in parsed.images
-                }
-
-                metadatas = [
-                    {
-                        "document_id": document_id,
-                        "chunk_index": c.chunk_index,
-                        "source": c.source_file,
-                        "file_type": document.file_type,
-                        "page_no": c.page_no,
-                        "heading_path": " > ".join(c.heading_path) if c.heading_path else "",
-                        "has_table": c.has_table,
-                        "has_code": c.has_code,
-                        # Image-aware metadata: pipe-separated IDs and URLs
-                        "image_ids": "|".join(c.image_refs) if c.image_refs else "",
-                        "table_ids": "|".join(c.table_refs) if c.table_refs else "",
-                        "image_urls": "|".join(
-                            _img_url_map.get(iid, "") for iid in c.image_refs
-                        ) if c.image_refs else "",
+                    ids = [
+                        f"doc_{document_id}_chunk_{i}"
+                        for i in range(len(parsed.chunks))
+                    ]
+                    # Build image_id→URL lookup for metadata
+                    _img_url_map = {
+                        img.image_id: f"/static/doc-images/kb_{self.workspace_id}/images/{img.image_id}.png"
+                        for img in parsed.images
                     }
-                    for c in parsed.chunks
-                ]
 
-                self.vector_store.add_documents(
-                    ids=ids,
-                    embeddings=embeddings,
-                    documents=chunk_texts,
-                    metadatas=metadatas,
-                )
+                    metadatas = [
+                        {
+                            "document_id": document_id,
+                            "chunk_index": c.chunk_index,
+                            "source": c.source_file,
+                            "file_type": document.file_type,
+                            "page_no": c.page_no,
+                            "heading_path": " > ".join(c.heading_path) if c.heading_path else "",
+                            "has_table": c.has_table,
+                            "has_code": c.has_code,
+                            # Image-aware metadata: pipe-separated IDs and URLs
+                            "image_ids": "|".join(c.image_refs) if c.image_refs else "",
+                            "table_ids": "|".join(c.table_refs) if c.table_refs else "",
+                            "image_urls": "|".join(
+                                _img_url_map.get(iid, "") for iid in c.image_refs
+                            ) if c.image_refs else "",
+                        }
+                        for c in parsed.chunks
+                    ]
+
+                    self.vector_store.add_documents(
+                        ids=ids,
+                        embeddings=embeddings,
+                        documents=chunk_texts,
+                        metadatas=metadatas,
+                    )
+                await asyncio.to_thread(_index_sync)
                 chunk_count = len(parsed.chunks)
 
             # KG ingest (async, non-blocking failure)

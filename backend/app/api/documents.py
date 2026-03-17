@@ -152,8 +152,9 @@ async def upload_document(
     filename = f"{uuid.uuid4()}{ext}"
     file_path = UPLOAD_DIR / filename
 
-    with open(file_path, "wb") as f:
-        f.write(content)
+    import aiofiles
+    async with aiofiles.open(file_path, "wb") as f:
+        await f.write(content)
 
     document = Document(
         workspace_id=workspace_id,
