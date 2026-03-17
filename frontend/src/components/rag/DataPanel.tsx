@@ -20,6 +20,7 @@ import { DocumentFilters, type FilterStatus } from "./DocumentFilters";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { WorkspaceSettings } from "./WorkspaceSettings";
 import { CustomMetadataInput } from "./CustomMetadataInput";
+import { DocumentCard } from "./DocumentCard";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { Document, RAGStats, DocumentStatus, KnowledgeBase, UpdateWorkspace } from "@/types";
