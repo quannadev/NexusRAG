@@ -57,7 +57,7 @@ server.registerTool(
   },
   async ({ document_id }) => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/documents/${document_id}`);
+      const response = await axios.get(`${API_BASE_URL}/documents/${document_id}/markdown`);
       return {
         content: [
           {
@@ -147,9 +147,8 @@ server.registerTool(
         content: [
           {
             type: "text",
-            text: `Failed to fetch chunks for document ${document_id}: ${
-              error.response?.data?.detail || error.message
-            }`,
+            text: `Failed to fetch chunks for document ${document_id}: ${error.response?.data?.detail || error.message
+              }`,
           },
         ],
         isError: true,
