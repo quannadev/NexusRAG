@@ -79,7 +79,7 @@ NexusRAG uses [Docling](https://github.com/docling-project/docling) for structur
 |---|---|---|
 | **Vector Embedding** | BAAI/bge-m3 | 1024-dim multilingual bi-encoder (100+ languages) |
 | **KG Embedding** | Gemini / Ollama / sentence-transformers | Configurable: Gemini (3072d), Ollama, or local sentence-transformers (e.g. bge-m3 1024d) |
-| **Vector Search** | PostgreSQL (pgvector) | Cosine similarity, over-fetch top-20 candidates (ChromaDB available as fallback) |
+| **Vector Search** | PostgreSQL (pgvector) | Cosine similarity via `pgvector.Vector` column, over-fetch top-20 candidates (ChromaDB supported as legacy fallback) |
 | **Knowledge Graph** | LightRAG | Entity/relationship extraction, keyword-to-entity matching |
 | **Reranking** | BAAI/bge-reranker-v2-m3 | Cross-encoder joint scoring — encodes (query, chunk) pairs together |
 | **Generation** | Gemini / Ollama | Agentic streaming chat with function calling |
@@ -389,10 +389,10 @@ Goal: compare cost-efficiency (local 4B/9B) vs cloud quality across faithfulness
 
 | Technology | Purpose |
 |---|---|
-| **PostgreSQL 15** | Document metadata, chat history, workspace config |
-| **PostgreSQL (pgvector)** | Vector embeddings containerized (ChromaDB supported) |
+| **PostgreSQL 15** (`nexusrag-postgres`) | Document metadata, chat history, workspace config — port 5433 |
+| **pgvector/pg15** (`nexusrag-vectordb`) | Dedicated vector store — `VectorChunk` table with native `vector` column, JSONB metadata, workspace isolation — port 5434 |
 | **LightRAG** | File-based KG (NetworkX + NanoVectorDB — no extra services) |
-| **Docker Compose** | Full-stack deployment (4 containers) |
+| **Docker Compose** | Full-stack deployment (4 containers: postgres, vectordb, backend, frontend) |
 | **nginx** | Production frontend serving + API/SSE reverse proxy |
 
 </details>
@@ -421,7 +421,7 @@ cd NexusRAG
 ./setup.sh
 ```
 
-The script checks prerequisites, creates venv, installs deps, starts PostgreSQL (Main + Vector DB), and optionally downloads ML models.
+The script checks prerequisites, creates venv, installs deps, starts two PostgreSQL services via `docker-compose.services.yml` (metadata DB on port 5433 + pgvector DB on port 5434), and optionally downloads ML models.
 
 ```bash
 # Terminal 1 — Backend (port 8080)
@@ -484,10 +484,21 @@ cp .env.example .env
 
 ### Vector Database
 
+NexusRAG uses a **dedicated PostgreSQL instance with the `pgvector` extension** as its primary vector store. All chunk embeddings are stored in the `vector_chunks` table (model: `VectorChunk`) using a native `vector` column, with JSONB for metadata and `workspace_id` for collection isolation.
+
 | Variable | Default | Description |
 |---|---|---|
-| `VECTOR_DB_PROVIDER` | `postgres` | `postgres` or `chroma` |
-| `VECTOR_DB_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5433/vectordb` | Connection URL for Vector DB |
+| `VECTOR_DB_PROVIDER` | `postgres` | `postgres` (default) or `chroma` (legacy fallback) |
+| `VECTOR_DB_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5434/vectordb` | Connection URL for the pgvector database (port 5434 via Docker) |
+
+**Two separate databases run in parallel:**
+
+| Container | Image | Port | Database | Purpose |
+|---|---|---|---|---|
+| `nexusrag-postgres` | `postgres:15-alpine` | 5433 | `nexusrag` | App metadata — workspaces, documents, chat history |
+| `nexusrag-vectordb` | `pgvector/pgvector:pg15` | 5434 | `vectordb` | Vector embeddings — cosine distance search via `pgvector` |
+
+> **Why two databases?** Keeping the vector store separate isolates high-volume embedding writes/reads from transactional metadata. The `pgvector/pg15` image comes with the `vector` extension pre-installed — no manual `CREATE EXTENSION` needed.
 
 ### RAG Pipeline
 

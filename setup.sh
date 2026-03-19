@@ -55,7 +55,7 @@ if command -v docker &>/dev/null; then
     echo "  Docker $(docker --version | cut -d' ' -f3 | tr -d ',')"
     HAS_DOCKER=true
 else
-    echo "  Docker: not found (PostgreSQL + ChromaDB must be started manually)"
+    echo "  Docker: not found (PostgreSQL instances must be started manually)"
     HAS_DOCKER=false
 fi
 
@@ -111,7 +111,7 @@ if [ "$HAS_DOCKER" = true ]; then
         sleep 1
     done
 else
-    echo "  Skipped (no Docker). Ensure PostgreSQL (port 5433) and ChromaDB (port 8002) are running."
+    echo "  Skipped (no Docker). Ensure PostgreSQL metadata DB (port 5433) and pgvector DB (port 5434) are running."
 fi
 
 # -----------------------------------------------------------

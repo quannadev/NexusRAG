@@ -20,3 +20,5 @@ showcase/demo_nexus_video.mp4
 
 scripts
 tasks/
+.vscode/
+.claude/
