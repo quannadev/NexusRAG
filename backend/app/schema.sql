@@ -55,26 +55,34 @@ CREATE TABLE public.documents (
     error_message character varying(500),
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL,
-    markdown_content text,
     page_count integer NOT NULL,
     image_count integer NOT NULL,
     table_count integer NOT NULL,
     parser_version character varying(50),
     processing_time_ms integer NOT NULL,
-    custom_metadata json
+    custom_metadata json,
+    -- S3 object storage (content-addressable via SHA-256 hash)
+    file_sha256 character varying(64),
+    s3_bucket character varying(255),
+    s3_raw_key character varying(1000),
+    s3_markdown_key character varying(1000)
 );
+
+CREATE INDEX idx_documents_file_sha256 ON public.documents USING btree (file_sha256);
 
 CREATE TABLE public.document_images (
     id SERIAL PRIMARY KEY,
     document_id integer NOT NULL REFERENCES public.documents(id) ON DELETE CASCADE,
     image_id character varying(100) NOT NULL UNIQUE,
     page_no integer NOT NULL,
-    file_path character varying(500) NOT NULL,
     caption text NOT NULL,
     width integer NOT NULL,
     height integer NOT NULL,
     mime_type character varying(50) NOT NULL,
-    created_at timestamp without time zone NOT NULL
+    created_at timestamp without time zone NOT NULL,
+    -- S3 object storage
+    s3_key character varying(1000),
+    s3_bucket character varying(255)
 );
 
 CREATE TABLE public.document_tables (

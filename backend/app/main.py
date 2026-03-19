@@ -7,7 +7,6 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 import logging
 
 from datetime import datetime, timedelta
@@ -85,6 +84,12 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Recovered {len(stale_ids)} stale documents: {stale_ids}")
     else:
         logger.info("AUTO_CREATE_TABLES=false — skipping auto-migration")
+    # Bootstrap S3/MinIO buckets (idempotent)
+    from app.services.storage_service import get_storage_service
+    import asyncio
+    await asyncio.to_thread(get_storage_service().ensure_buckets_exist)
+    logger.info("S3 buckets verified/created")
+
     yield
     logger.info("Shutting down...")
     await engine.dispose()
@@ -130,11 +135,6 @@ async def ready():
 from app.api.router import api_router  # noqa: E402
 
 app.include_router(api_router, prefix="/api/v1")
-
-# Static files — document images extracted by NexusRAG (Docling)
-_docling_data = Path(__file__).resolve().parent.parent / "data" / "docling"
-_docling_data.mkdir(parents=True, exist_ok=True)
-app.mount("/static/doc-images", StaticFiles(directory=str(_docling_data)), name="static_doc_images")
 
 # Import models so SQLAlchemy registers them
 from app.models import knowledge_base, document, chat_message  # noqa: E402, F401

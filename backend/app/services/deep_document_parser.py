@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -38,15 +39,12 @@ class DeepDocumentParser:
 
     - Converts PDF/DOCX/PPTX/HTML via Docling DocumentConverter
     - Chunks using HybridChunker (semantic + structural)
-    - Extracts images and optionally captions them via Gemini Vision
+    - Extracts images, uploads them to S3, stores s3_key references
     - Falls back to legacy text extraction for TXT/MD
     """
 
-    def __init__(self, workspace_id: int, output_dir: Optional[Path] = None):
+    def __init__(self, workspace_id: int):
         self.workspace_id = workspace_id
-        self.output_dir = output_dir or (
-            settings.BASE_DIR / "data" / "docling" / f"kb_{workspace_id}"
-        )
         self._converter = None
 
     def _get_converter(self):
@@ -337,24 +335,30 @@ class DeepDocumentParser:
         document_id: int,
     ) -> tuple[list[ExtractedImage], list[tuple[str, str]]]:
         """
-        Extract images and build URL mapping for markdown placeholders.
+        Extract images, upload to S3, and build URL mapping for markdown.
+
+        Each image is:
+        1. Rendered by Docling into a temporary PNG file
+        2. Uploaded to the ``nexusrag-images`` S3 bucket
+        3. Deleted from local disk immediately after upload
 
         Returns:
-            (images, pic_url_list) where pic_url_list has one (caption, url)
+            (images, pic_url_list) where pic_url_list has one (caption, presigned_url)
             tuple per doc.pictures element, in order.
         """
         if not settings.NEXUSRAG_ENABLE_IMAGE_EXTRACTION:
             return [], []
 
-        images_dir = self.output_dir / "images"
-        images_dir.mkdir(parents=True, exist_ok=True)
-
-        images: list[ExtractedImage] = []
-        pic_to_image_idx: list[int] = []  # maps picture index → images list index
-        picture_count = 0
-
         if not hasattr(doc, "pictures") or not doc.pictures:
             return [], []
+
+        from app.services.storage_service import get_storage_service
+        storage = get_storage_service()
+
+        images: list[ExtractedImage] = []
+        # Maps picture list index → images list index (-1 = skipped)
+        pic_to_image_idx: list[int] = []
+        picture_count = 0
 
         for pic in doc.pictures:
             if picture_count >= settings.NEXUSRAG_MAX_IMAGES_PER_DOC:
@@ -372,19 +376,37 @@ class DeepDocumentParser:
                         break
 
             try:
-                image_path = images_dir / f"{image_id}.png"
-
-                if hasattr(pic, "image") and pic.image:
-                    pil_image = pic.image.pil_image
-                    if pil_image:
-                        pil_image.save(str(image_path), format="PNG")
-                        width, height = pil_image.size
-                    else:
-                        pic_to_image_idx.append(-1)
-                        continue
-                else:
+                if not (hasattr(pic, "image") and pic.image):
                     pic_to_image_idx.append(-1)
                     continue
+
+                pil_image = pic.image.pil_image
+                if not pil_image:
+                    pic_to_image_idx.append(-1)
+                    continue
+
+                width, height = pil_image.size
+
+                # Write to a temp file so Pillow can encode it, then upload
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    tmp_path = Path(tmp.name)
+
+                try:
+                    pil_image.save(str(tmp_path), format="PNG")
+                    image_bytes = tmp_path.read_bytes()
+                finally:
+                    # Always clean up local temp file
+                    tmp_path.unlink(missing_ok=True)
+
+                # Upload to S3
+                s3_key = storage.image_key(self.workspace_id, image_id)
+                s3_bucket = settings.S3_BUCKET_IMAGES
+                storage.upload_bytes(
+                    bucket=s3_bucket,
+                    key=s3_key,
+                    data=image_bytes,
+                    content_type="image/png",
+                )
 
                 # Get caption
                 caption = ""
@@ -397,7 +419,8 @@ class DeepDocumentParser:
                     image_id=image_id,
                     document_id=document_id,
                     page_no=page_no,
-                    file_path=str(image_path),
+                    s3_key=s3_key,
+                    s3_bucket=s3_bucket,
                     caption=caption,
                     width=width,
                     height=height,
@@ -410,19 +433,19 @@ class DeepDocumentParser:
                 pic_to_image_idx.append(-1)
                 continue
 
-        logger.info(f"Extracted {len(images)} images from document {document_id}")
+        logger.info(f"Extracted and uploaded {len(images)} images for document {document_id}")
 
         # Caption images with Gemini Vision (updates img.caption in-place)
         if settings.NEXUSRAG_ENABLE_IMAGE_CAPTIONING and images:
-            self._caption_images(images)
+            self._caption_images(images, storage)
 
         # Build pic_url_list AFTER captioning so captions are up-to-date
         pic_url_list: list[tuple[str, str]] = []
         for idx in pic_to_image_idx:
             if idx >= 0:
                 img = images[idx]
-                url = f"/static/doc-images/kb_{self.workspace_id}/images/{img.image_id}.png"
-                pic_url_list.append((img.caption, url))
+                presigned_url = storage.generate_presigned_url(img.s3_bucket, img.s3_key)
+                pic_url_list.append((img.caption, presigned_url))
             else:
                 pic_url_list.append(("", ""))
 
@@ -626,11 +649,11 @@ class DeepDocumentParser:
         )
         return "\n".join(result_lines)
 
-    def _caption_images(self, images: list[ExtractedImage]) -> None:
+    def _caption_images(self, images: list[ExtractedImage], storage=None) -> None:
         """Caption images using the configured LLM provider (sync, best-effort).
 
-        Generates detailed descriptions so that image content is
-        semantically searchable when embedded alongside text chunks.
+        Image bytes are fetched from S3 (``storage``) to avoid re-reading
+        local files (which have already been deleted after upload).
         """
         from app.services.llm import get_llm_provider
         from app.services.llm.types import LLMImagePart, LLMMessage
@@ -662,12 +685,12 @@ class DeepDocumentParser:
             if img.caption:  # already has caption from document
                 continue
             try:
-                image_path = Path(img.file_path)
-                if not image_path.exists():
+                # Fetch bytes from S3 — local temp file is already gone
+                if storage:
+                    image_bytes = storage.download_bytes(img.s3_bucket, img.s3_key)
+                else:
+                    logger.debug(f"No storage provided for captioning image {img.image_id}, skipping")
                     continue
-
-                with open(image_path, "rb") as f:
-                    image_bytes = f.read()
 
                 message = LLMMessage(
                     role="user",
@@ -676,7 +699,6 @@ class DeepDocumentParser:
                 )
                 result = provider.complete([message])
                 if result:
-                    # Collapse to single line — prevents breaking ![alt](url) markdown
                     img.caption = " ".join(result.strip().split())[:500]
 
             except Exception as e:

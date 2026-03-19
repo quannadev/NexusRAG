@@ -13,11 +13,17 @@ from typing import Optional
 
 @dataclass
 class ExtractedImage:
-    """An image extracted from a document by Docling."""
+    """An image extracted from a document by Docling.
+
+    Images are uploaded to S3 during parsing; local temp files are deleted
+    immediately after upload.  ``s3_key`` / ``s3_bucket`` are the canonical
+    references stored in Postgres and used to generate presigned URLs.
+    """
     image_id: str
     document_id: int
     page_no: int
-    file_path: str
+    s3_key: str           # object key in S3/MinIO
+    s3_bucket: str        # bucket name
     caption: str = ""
     width: int = 0
     height: int = 0

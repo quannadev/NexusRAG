@@ -1,4 +1,4 @@
-from sqlalchemy import String, ForeignKey, DateTime, Integer, Text, Enum, JSON
+from sqlalchemy import String, ForeignKey, DateTime, Integer, Text, Enum, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 import enum
@@ -35,13 +35,19 @@ class Document(Base):
     )
 
     # NexusRAG fields
-    markdown_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     page_count: Mapped[int] = mapped_column(Integer, default=0)
     image_count: Mapped[int] = mapped_column(Integer, default=0)
     table_count: Mapped[int] = mapped_column(Integer, default=0)
     parser_version: Mapped[str | None] = mapped_column(String(50), nullable=True)  # "docling" | "legacy"
     processing_time_ms: Mapped[int] = mapped_column(Integer, default=0)
     custom_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # S3 object storage — raw file + parsed markdown live in S3, NOT in postgres
+    # sha256 hash enables content-addressable deduplication
+    file_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    s3_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    s3_raw_key: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    s3_markdown_key: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # Relationships
     workspace: Mapped["KnowledgeBase"] = relationship(back_populates="documents")
@@ -60,12 +66,15 @@ class DocumentImage(Base):
     document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))
     image_id: Mapped[str] = mapped_column(String(100), unique=True)  # UUID
     page_no: Mapped[int] = mapped_column(Integer, default=0)
-    file_path: Mapped[str] = mapped_column(String(500))
     caption: Mapped[str] = mapped_column(Text, default="")
     width: Mapped[int] = mapped_column(Integer, default=0)
     height: Mapped[int] = mapped_column(Integer, default=0)
     mime_type: Mapped[str] = mapped_column(String(50), default="image/png")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # S3 object storage — images stored in nexusrag-images bucket
+    s3_key: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    s3_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Relationships
     document: Mapped["Document"] = relationship(back_populates="images")

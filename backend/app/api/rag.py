@@ -326,7 +326,7 @@ async def reindex_document(
     document_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Re-process an existing document through the NexusRAG pipeline."""
+    """Re-process an existing document through the NexusRAG pipeline from S3."""
     result = await db.execute(select(Document).where(Document.id == document_id))
     document = result.scalar_one_or_none()
 
@@ -339,13 +339,10 @@ async def reindex_document(
             detail="Document is currently being processed"
         )
 
-    from pathlib import Path
-    file_path = Path(UPLOAD_DIR) / document.filename
-
-    if not file_path.exists():
+    if not document.s3_raw_key or not document.s3_bucket:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document file not found on disk"
+            detail="Document has no S3 raw file. Re-upload the document first."
         )
 
     rag_service = get_rag_service(db, document.workspace_id)
@@ -356,20 +353,33 @@ async def reindex_document(
     except Exception as e:
         logging.getLogger(__name__).warning(f"Failed to delete old data for reindex: {e}")
 
-    # Reset document metadata
+    # Reset document metadata (markdown is re-uploaded to S3 by process_document)
     document.status = DocumentStatus.PENDING
     document.chunk_count = 0
-    document.markdown_content = None
+    document.s3_markdown_key = None
     document.image_count = 0
     document.table_count = 0
     document.parser_version = None
     document.error_message = None
     await db.commit()
 
+    # Download raw file from S3 to a tempfile, then run pipeline
+    import tempfile, asyncio
+    from pathlib import Path
+    from app.services.storage_service import get_storage_service
+    storage = get_storage_service()
+    raw_bytes = await asyncio.to_thread(
+        storage.download_bytes, document.s3_bucket, document.s3_raw_key
+    )
+    ext = Path(document.s3_raw_key).suffix or ".bin"
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(raw_bytes)
+        tmp_path = tmp.name
+
     try:
         chunk_count = await rag_service.process_document(
             document_id=document_id,
-            file_path=str(file_path)
+            file_path=tmp_path
         )
         return DocumentProcessResponse(
             document_id=document_id,
@@ -382,6 +392,8 @@ async def reindex_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reindex document: {str(e)}"
         )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
 
 @router.post("/reindex-workspace/{workspace_id}")
@@ -1004,9 +1016,13 @@ async def chat_with_documents(
 
     MAX_VISION_IMAGES = 3  # Limit images to control token cost
     for idx, img in enumerate(resolved_images[:MAX_VISION_IMAGES]):
-        img_ref_id = _generate_citation_id(used_ids)
-        used_ids.add(img_ref_id)
-        img_url = f"/static/doc-images/kb_{workspace_id}/images/{img.image_id}.png"
+        # Generate presigned URL for the client to display the image
+        if img.s3_key and img.s3_bucket:
+            from app.services.storage_service import get_storage_service as _get_storage
+            _storage = _get_storage()
+            img_url = _storage.generate_presigned_url(img.s3_bucket, img.s3_key)
+        else:
+            img_url = ""
         chat_image_refs.append(ChatImageRef(
             ref_id=img_ref_id,
             image_id=img.image_id,
@@ -1022,11 +1038,12 @@ async def chat_with_documents(
         image_context_parts.append(
             f"- [IMG-{img_ref_id}] Page {img.page_no}: {cap}"
         )
-        # Read actual image file for Gemini Vision
-        img_path = _P(img.file_path)
-        if img_path.exists():
+        # Download image bytes from S3 for Gemini Vision
+        if img.s3_key and img.s3_bucket:
             try:
-                img_bytes = img_path.read_bytes()
+                import asyncio as _asyncio
+                _storage = _get_storage()
+                img_bytes = await _asyncio.to_thread(_storage.download_bytes, img.s3_bucket, img.s3_key)
                 mime = img.mime_type or "image/png"
                 image_parts.append({
                     "inline_data": {"mime_type": mime, "data": img_bytes},
@@ -1035,7 +1052,7 @@ async def chat_with_documents(
                     "img_ref_id": img_ref_id,
                 })
             except Exception as e:
-                logger.warning(f"Failed to read image {img.image_id}: {e}")
+                logger.warning(f"Failed to download image {img.image_id} from S3: {e}")
 
     # -- 3. Call LLM with context + images --
     from app.services.llm import get_llm_provider

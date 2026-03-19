@@ -86,6 +86,16 @@ class Settings(BaseSettings):
     NEXUSRAG_RERANKER_TOP_K: int = 8
     NEXUSRAG_MIN_RELEVANCE_SCORE: float = 0.15
 
+    # S3 / MinIO Object Storage
+    S3_ENDPOINT_URL: str = Field(default="http://localhost:9000")
+    S3_ACCESS_KEY_ID: str = Field(default="minioadmin")
+    S3_SECRET_ACCESS_KEY: str = Field(default="minioadmin")
+    S3_REGION: str = Field(default="us-east-1")
+    S3_BUCKET_DOCUMENTS: str = Field(default="nexusrag-documents")
+    S3_BUCKET_IMAGES: str = Field(default="nexusrag-images")
+    # TTL for presigned URLs served to clients (seconds)
+    S3_PRESIGN_EXPIRES_SECONDS: int = Field(default=3600)
+
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5174", "http://localhost:3000"]
 

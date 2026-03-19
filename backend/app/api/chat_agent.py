@@ -344,9 +344,13 @@ async def _execute_search_documents(
     image_parts: list[dict] = []
 
     for img in resolved_images[:MAX_VISION_IMAGES]:
-        img_ref_id = _generate_citation_id(existing_ids)
-        existing_ids.add(img_ref_id)
-        img_url = f"/static/doc-images/kb_{workspace_id}/images/{img.image_id}.png"
+        # Generate presigned URL for the client to display the image
+        if img.s3_key and img.s3_bucket:
+            from app.services.storage_service import get_storage_service
+            storage = get_storage_service()
+            img_url = storage.generate_presigned_url(img.s3_bucket, img.s3_key)
+        else:
+            img_url = ""
         chat_image_refs.append(ChatImageRef(
             ref_id=img_ref_id,
             image_id=img.image_id,
@@ -360,10 +364,13 @@ async def _execute_search_documents(
         cap = f'"{img.caption}"' if img.caption else "no caption"
         image_context_parts.append(f"- [IMG-{img_ref_id}] Page {img.page_no}: {cap}")
 
-        img_path = _P(img.file_path)
-        if img_path.exists():
+        # Download image bytes from S3 for multimodal LLM vision
+        if img.s3_key and img.s3_bucket:
             try:
-                img_bytes = img_path.read_bytes()
+                from app.services.storage_service import get_storage_service
+                import asyncio
+                storage = get_storage_service()
+                img_bytes = await asyncio.to_thread(storage.download_bytes, img.s3_bucket, img.s3_key)
                 mime = img.mime_type or "image/png"
                 image_parts.append({
                     "inline_data": {"mime_type": mime, "data": img_bytes},
@@ -372,7 +379,7 @@ async def _execute_search_documents(
                     "img_ref_id": img_ref_id,
                 })
             except Exception as e:
-                logger.warning(f"Failed to read image {img.image_id}: {e}")
+                logger.warning(f"Failed to download image {img.image_id} from S3: {e}")
 
     if image_context_parts:
         context += "\n\nDocument Images:\n" + "\n".join(image_context_parts)

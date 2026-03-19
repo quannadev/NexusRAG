@@ -106,6 +106,8 @@ class NexusRAGService:
             await self.db.commit()
 
             import asyncio
+            from app.services.storage_service import get_storage_service
+            storage = get_storage_service()
             parsed = await asyncio.to_thread(
                 self.parser.parse,
                 file_path=file_path,
@@ -113,8 +115,20 @@ class NexusRAGService:
                 original_filename=document.original_filename,
             )
 
-            # Save markdown + images to DB
-            document.markdown_content = parsed.markdown
+            # Save parsed markdown to S3 (not to Postgres TEXT column)
+            markdown_bytes = parsed.markdown.encode("utf-8")
+            # Use file_sha256 as key if available (content-addressable), else fall back to doc id
+            sha256_hex = document.file_sha256 or f"doc{document_id}"
+            md_key = storage.markdown_key(self.workspace_id, sha256_hex)
+            await asyncio.to_thread(
+                storage.upload_bytes,
+                settings.S3_BUCKET_DOCUMENTS,
+                md_key,
+                markdown_bytes,
+                "text/markdown; charset=utf-8",
+            )
+            document.s3_markdown_key = md_key
+            document.s3_bucket = settings.S3_BUCKET_DOCUMENTS
             document.page_count = parsed.page_count
             document.table_count = parsed.tables_count
             document.parser_version = (
@@ -128,13 +142,14 @@ class NexusRAGService:
             )
             await self.db.commit()
 
-            # Save extracted images to DB
+            # Save extracted images to DB (S3 keys, not local paths)
             for img in parsed.images:
                 db_image = DocumentImage(
                     document_id=document_id,
                     image_id=img.image_id,
                     page_no=img.page_no,
-                    file_path=img.file_path,
+                    s3_key=img.s3_key,
+                    s3_bucket=img.s3_bucket,
                     caption=img.caption,
                     width=img.width,
                     height=img.height,
@@ -193,9 +208,9 @@ class NexusRAGService:
                         f"doc_{document_id}_chunk_{i}"
                         for i in range(len(parsed.chunks))
                     ]
-                    # Build image_id→URL lookup for metadata
+                    # Build image_id→presigned URL lookup for chunk metadata
                     _img_url_map = {
-                        img.image_id: f"/static/doc-images/kb_{self.workspace_id}/images/{img.image_id}.png"
+                        img.image_id: storage.generate_presigned_url(img.s3_bucket, img.s3_key)
                         for img in parsed.images
                     }
 
@@ -351,20 +366,43 @@ class NexusRAGService:
     # ------------------------------------------------------------------
 
     async def delete_document(self, document_id: int) -> None:
-        """Delete a document's data from vector store and KG."""
+        """Delete a document's data from vector store, KG, and S3."""
+        from app.services.storage_service import get_storage_service
+        import asyncio
+
+        storage = get_storage_service()
         self.vector_store.delete_by_document_id(document_id)
 
-        # Delete images from DB (cascade handles it, but clean up files)
+        # Fetch document for S3 keys before DB cascade deletes records
         result = await self.db.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+
+        # Fetch images for S3 cleanup
+        img_result = await self.db.execute(
             select(DocumentImage).where(DocumentImage.document_id == document_id)
         )
-        for img in result.scalars().all():
-            from pathlib import Path
-            img_path = Path(img.file_path)
-            if img_path.exists():
-                img_path.unlink()
+        db_images = img_result.scalars().all()
 
-        logger.info(f"Deleted document {document_id} from NexusRAG stores")
+        # Delete S3 objects (best-effort — non-blocking)
+        s3_keys_to_delete: list[tuple[str, str]] = []
+        if doc:
+            if doc.s3_raw_key and doc.s3_bucket:
+                s3_keys_to_delete.append((doc.s3_bucket, doc.s3_raw_key))
+            if doc.s3_markdown_key and doc.s3_bucket:
+                s3_keys_to_delete.append((doc.s3_bucket, doc.s3_markdown_key))
+        for img in db_images:
+            if img.s3_key and img.s3_bucket:
+                s3_keys_to_delete.append((img.s3_bucket, img.s3_key))
+
+        for bucket, key in s3_keys_to_delete:
+            await asyncio.to_thread(storage.delete_object, bucket, key)
+
+        logger.info(
+            f"Deleted document {document_id}: "
+            f"{len(s3_keys_to_delete)} S3 objects removed"
+        )
 
     def get_chunk_count(self) -> int:
         """Return total number of chunks in the knowledge base's vector store."""
