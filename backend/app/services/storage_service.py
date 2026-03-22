@@ -193,3 +193,4 @@ class StorageService:
 @lru_cache(maxsize=1)
 def get_storage_service() -> StorageService:
     """Return the singleton StorageService instance."""
+    return StorageService()

@@ -137,18 +137,22 @@ async def process_document_background(document_id: int, s3_raw_key: str, workspa
 @router.get("/workspace/{workspace_id}", response_model=list[DocumentResponse])
 async def list_documents(
     workspace_id: int,
+    tenant_id: str | None = Query(default=None, description="Filter by tenant/bot ID"),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all documents in a knowledge base."""
+    """List all documents in a knowledge base. Optionally filter by tenant_id."""
     result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == workspace_id))
     kb = result.scalar_one_or_none()
 
     if kb is None:
         raise NotFoundError("KnowledgeBase", workspace_id)
 
-    result = await db.execute(
-        select(Document).where(Document.workspace_id == workspace_id).order_by(Document.created_at.desc())
-    )
+    stmt = select(Document).where(Document.workspace_id == workspace_id)
+    if tenant_id is not None:
+        stmt = stmt.where(Document.tenant_id == tenant_id)
+    stmt = stmt.order_by(Document.created_at.desc())
+
+    result = await db.execute(stmt)
     return result.scalars().all()
 
 
