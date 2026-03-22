@@ -54,6 +54,8 @@ Most RAG systems follow a simple pipeline: split text → embed → retrieve →
 | **Context** | Raw chunks dumped to LLM | Structured assembly: KG insights → cited chunks → related images/tables |
 | **Citations** | None or manual | Auto-generated 4-char IDs with page number and heading path |
 | **Page awareness** | Lost after chunking | Preserved end-to-end: chunk → citation → document viewer navigation |
+| **File Storage** | Local disk (not scalable) | S3-compatible object storage (MinIO / AWS S3) — content-addressed with SHA-256 dedup |
+| **Data Isolation** | Workspace-only (coarse-grained) | 3-tier: `workspace → tenant → documents` — full KG + vector + storage isolation per tenant |
 
 ---
 
@@ -111,6 +113,81 @@ Images and tables are **embedded into chunk vectors** — not stored separately.
 2. Text LLM summarizes each table: purpose, key columns, notable values (max 500 chars)
 3. Summaries appended to page chunks: `[Table on page 5 (3x4)]: Annual sales by region`
 4. Table summaries injected back into document Markdown as blockquotes for the document viewer
+
+</details>
+
+<details>
+<summary><b>S3 Object Storage (MinIO / AWS S3)</b></summary>
+
+All uploaded files and parsed markdown are stored in S3-compatible object storage instead of local disk — enabling scalable, cloud-ready deployments:
+
+- **Content-addressed dedup** — Files are hashed with SHA-256 before upload. Identical files across workspaces share the same S3 object, preventing redundant storage
+- **Zero disk writes** — Raw files, extracted markdown, and images are all stored in and served from S3. The backend container holds no document state
+- **Tenant-prefixed keys** — Object keys encode both workspace and tenant: `kb_{workspace_id}/tenant_{tenant_id}/raw/{sha256}{ext}`. This makes storage layout self-documenting and enables prefix-based access control
+- **Presigned URL delivery** — Files are never proxied through the backend. The frontend receives time-limited presigned URLs for direct S3 access
+- **Docker-bundled MinIO** — Development and self-hosted deployments use MinIO (S3-compatible) bundled in `docker-compose.yml`. Drop-in replacement with AWS S3 / GCS / R2 via env vars
+- **Auto-created bucket** — MinIO bucket is created automatically on first startup via `mc mb` in the MinIO init container
+
+```
+S3 Key Layout
+─────────────────────────────────────────────────
+kb_{workspace_id}/raw/{sha256}.pdf          ← workspace-level (no tenant)
+kb_{workspace_id}/tenant_{id}/raw/{sha256}.pdf  ← tenant-scoped raw file
+kb_{workspace_id}/tenant_{id}/md/{sha256}.md    ← parsed markdown
+kb_{workspace_id}/tenant_{id}/img/{sha256}/{uuid}.png  ← extracted images
+```
+
+</details>
+
+<details>
+<summary><b>Tenant Isolation (workspace → tenant → documents)</b></summary>
+
+> 📄 Full documentation: [docs/tenant-isolation.md](docs/tenant-isolation.md)
+
+NexusRAG supports a 3-tier data hierarchy that enables true multi-tenant deployments within a single workspace. Each tenant (e.g., a bot, a department, or a customer) gets fully isolated data at **every layer of the stack**:
+
+```
+Workspace (knowledge base)
+└── Tenant / Bot A
+│   ├── Vector store: ChromaDB where={tenant_id: "bot_a"}
+│   ├── Knowledge graph: kb_1__t_bot_a/ (separate LightRAG dir)
+│   └── S3: kb_1/tenant_bot_a/raw/... + kb_1/tenant_bot_a/md/...
+└── Tenant / Bot B
+    ├── Vector store: ChromaDB where={tenant_id: "bot_b"}
+    ├── Knowledge graph: kb_1__t_bot_b/ (separate LightRAG dir)
+    └── S3: kb_1/tenant_bot_b/raw/... + kb_1/tenant_bot_b/md/...
+```
+
+**Isolation guarantees per layer:**
+
+| Layer | Mechanism | Guarantee |
+|---|---|---|
+| **Knowledge Graph** | Separate LightRAG working directory per tenant | KG entities from Bot A are never returned to Bot B |
+| **Vector search** | Auto-injected `where: {tenant_id: "..."}` ChromaDB filter | Chunks tagged with Bot A's tenant_id are invisible to Bot B queries |
+| **S3 storage** | Tenant-prefixed object keys | Files are path-separated; prefix-based IAM policies can enforce access |
+| **Database** | `tenant_id` column + composite index `(workspace_id, tenant_id)` | Duplicate dedup checks are tenant-scoped |
+
+**Backward compatible:** `tenant_id=null` behaves identically to the old workspace-global mode — no migration of existing data required.
+
+**API usage:**
+
+```bash
+# Upload a document scoped to bot_1
+POST /documents/upload/1
+Form: file=report.pdf, tenant_id=bot_1
+
+# Query only bot_1's documents (KG + vector both isolated)
+POST /rag/query/1
+{"question": "What is the revenue?", "tenant_id": "bot_1"}
+
+# Streaming chat scoped to bot_1
+POST /rag/chat/1/stream
+{"message": "Summarize the report", "tenant_id": "bot_1"}
+
+# Admin / global query (no tenant filter — sees all documents)
+POST /rag/query/1
+{"question": "What is the revenue?"}
+```
 
 </details>
 
@@ -271,6 +348,7 @@ The chat system uses a semi-agentic architecture with real-time SSE streaming:
 - Multiple isolated knowledge bases, each with its own documents, ChromaDB collection, and KG
 - Custom system prompt per workspace (override default Q&A behavior)
 - Independent chat history with message persistence and ratings
+- Optional tenant sub-layer within each workspace for fine-grained bot/department isolation
 
 </details>
 
@@ -377,6 +455,7 @@ Goal: compare cost-efficiency (local 4B/9B) vs cloud quality across faithfulness
 | **sentence-transformers** | BAAI/bge-m3 embeddings + BAAI/bge-reranker-v2-m3 reranking |
 | **google-genai** | Gemini API — chat, vision, function calling, extended thinking |
 | **ollama** | Local LLM — tool calling via prompt tags, multimodal support |
+| **boto3** | S3 client — file upload, presigned URL generation, object management |
 
 </details>
 
@@ -404,7 +483,8 @@ Goal: compare cost-efficiency (local 4B/9B) vs cloud quality across faithfulness
 | **PostgreSQL 15** | Document metadata, chat history, workspace config |
 | **ChromaDB** | Vector embeddings (HTTP client, containerized) |
 | **LightRAG** | File-based KG (NetworkX + NanoVectorDB — no extra services) |
-| **Docker Compose** | Full-stack deployment (4 containers) |
+| **MinIO** | S3-compatible object storage — raw files, markdown, images |
+| **Docker Compose** | Full-stack deployment (5 containers: backend, frontend, postgres, chromadb, minio) |
 | **nginx** | Production frontend serving + API/SSE reverse proxy |
 
 </details>
@@ -507,12 +587,28 @@ cp .env.example .env
 | `NEXUSRAG_ENABLE_IMAGE_CAPTIONING` | `true` | LLM-caption images for search |
 | `NEXUSRAG_KG_LANGUAGE` | `Vietnamese` | KG extraction language |
 
+### S3 / Object Storage
+
+| Variable | Default | Description |
+|---|---|---|
+| `S3_ENDPOINT_URL` | `http://localhost:9000` | MinIO or S3-compatible endpoint |
+| `S3_PUBLIC_URL` | `http://localhost:9000` | Public URL for presigned URLs (browser-accessible) |
+| `S3_ACCESS_KEY` | `minioadmin` | Access key |
+| `S3_SECRET_KEY` | `minioadmin` | Secret key |
+| `S3_BUCKET_DOCUMENTS` | `nexusrag-documents` | Bucket for raw files, markdown, images |
+| `S3_REGION` | `us-east-1` | Region (cosmetic for MinIO, required for AWS S3) |
+
+> **AWS S3** — Set `S3_ENDPOINT_URL` to empty and configure real AWS credentials + region.
+> **Cloudflare R2** — Set endpoint to `https://<account>.r2.cloudflarestorage.com`.
+
 </details>
 
 ---
 
 ## Roadmap
 
+- [x] **S3 Object Storage** — MinIO-backed file storage with content-addressed dedup and presigned URL delivery
+- [x] **Tenant Isolation** — `workspace → tenant → documents` 3-tier hierarchy with full KG + vector + storage isolation
 - [ ] **Multimodal Retrieval** — Integrate Gemini Embedding 2 (multimodal) for audio and video input retrieval — ask questions about podcasts, lectures, or video content directly
 
 ---
@@ -545,6 +641,8 @@ All endpoints prefixed with `/api/v1`. Interactive docs at http://localhost:8080
 
 | Method | Endpoint | Description |
 |---|---|---|
+| `GET` | `/workspaces/{id}/tenants` | List tenants in a workspace (with doc stats) |
+| `DELETE` | `/workspaces/{id}/tenants/{tenant_id}` | Delete all data for a tenant — [details](docs/tenant-isolation.md) |
 | `GET` | `/workspaces` | List all workspaces |
 | `POST` | `/workspaces` | Create workspace |
 | `PUT` | `/workspaces/{id}` | Update workspace |
@@ -557,10 +655,19 @@ All endpoints prefixed with `/api/v1`. Interactive docs at http://localhost:8080
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/documents/upload/{workspace_id}` | Upload file (supports `custom_metadata`) |
-| `GET` | `/documents/{id}/markdown` | Get parsed content |
+| `POST` | `/documents/upload/{workspace_id}` | Upload file (supports `custom_metadata`, `tenant_id`) |
+| `GET` | `/documents/{id}/markdown` | Get parsed content (streamed from S3) |
 | `GET` | `/documents/{id}/images` | List extracted images |
-| `DELETE` | `/documents/{id}` | Delete document |
+| `GET` | `/documents/{id}/presign` | Get presigned S3 URL for raw file download |
+| `DELETE` | `/documents/{id}` | Delete document + S3 objects |
+
+**Upload with tenant isolation:**
+```bash
+curl -X POST http://localhost:8080/api/v1/documents/upload/1 \
+  -F "file=@report.pdf" \
+  -F "tenant_id=bot_1" \
+  -F 'custom_metadata=[{"key":"year","value":"2025"}]'
+```
 
 </details>
 
@@ -569,18 +676,29 @@ All endpoints prefixed with `/api/v1`. Interactive docs at http://localhost:8080
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/rag/query/{workspace_id}` | Hybrid search (supports `metadata_filter`) |
-| `POST` | `/rag/chat/{workspace_id}/stream` | Agentic streaming chat (SSE) (supports `metadata_filter`) |
+| `POST` | `/rag/query/{workspace_id}` | Hybrid search (supports `metadata_filter`, `tenant_id`) |
+| `POST` | `/rag/chat/{workspace_id}/stream` | Agentic streaming chat SSE (supports `tenant_id`) |
 | `GET` | `/rag/chat/{workspace_id}/history` | Chat history |
 | `POST` | `/rag/process/{document_id}` | Process document |
 | `GET` | `/rag/graph/{workspace_id}` | Knowledge graph data |
 | `GET` | `/rag/analytics/{workspace_id}` | Full analytics |
 
+**Query with tenant isolation:**
+```bash
+# Scoped to bot_1 — KG + vector both isolated
+curl -X POST http://localhost:8080/api/v1/rag/query/1 \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is the revenue?", "tenant_id": "bot_1"}'
+
+# Global query (no tenant filter)
+curl -X POST http://localhost:8080/api/v1/rag/query/1 \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is the revenue?"}'
+```
+
 </details>
 
 ---
-
-## Star History
 
 ## Star History
 
