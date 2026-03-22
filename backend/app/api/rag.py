@@ -224,13 +224,10 @@ async def process_document(
             message="Document is already indexed"
         )
 
-    from pathlib import Path
-    file_path = Path(UPLOAD_DIR) / document.filename
-
-    if not file_path.exists():
+    if not document.s3_raw_key or not document.s3_bucket:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document file not found on disk"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Document has no raw file in S3. Please re-upload the document."
         )
 
     # Mark as processing immediately so UI updates
@@ -238,11 +235,11 @@ async def process_document(
     document.error_message = None
     await db.commit()
 
-    # Launch background task
+    # Launch background task — downloads from S3 into a tempfile
     from app.api.documents import process_document_background
     import asyncio
     asyncio.get_event_loop().create_task(
-        process_document_background(document_id, str(file_path), document.workspace_id)
+        process_document_background(document_id, document.s3_raw_key, document.workspace_id)
     )
 
     return DocumentProcessResponse(
@@ -263,8 +260,6 @@ async def process_batch(
     Marks all as PROCESSING immediately, then processes one-by-one to avoid
     resource contention (each doc uses Docling + embeddings + KG ingest).
     """
-    from pathlib import Path as _P
-
     accepted_ids = []
     skipped_ids = []
 
@@ -282,15 +277,16 @@ async def process_batch(
             skipped_ids.append(doc_id)
             continue
 
-        file_path = _P(UPLOAD_DIR) / doc.filename
-        if not file_path.exists():
+        # Skip documents without a raw S3 key
+        if not doc.s3_raw_key:
+            logger.warning(f"Batch: doc {doc_id} has no s3_raw_key — skipped")
             skipped_ids.append(doc_id)
             continue
 
         # Mark as processing immediately so UI updates
         doc.status = DocumentStatus.PROCESSING
         doc.error_message = None
-        accepted_ids.append((doc_id, str(file_path), doc.workspace_id))
+        accepted_ids.append((doc_id, doc.s3_raw_key, doc.workspace_id))
 
     await db.commit()
 
