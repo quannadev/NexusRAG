@@ -136,6 +136,47 @@ async def update_workspace(
     return await _enrich_response(db, kb)
 
 
+
+@router.get("/{workspace_id}/tenants")
+async def list_workspace_tenants(
+    workspace_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """List all tenants (bots) that have documents in this workspace.
+
+    Returns a list of distinct tenant_ids with per-tenant document stats.
+    Documents with tenant_id=NULL are returned under the key ``null``
+    representing workspace-global (un-scoped) documents.
+    """
+    result = await db.execute(
+        select(KnowledgeBase).where(KnowledgeBase.id == workspace_id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise NotFoundError("KnowledgeBase", workspace_id)
+
+    # Distinct tenant_ids (including NULL = global workspace docs)
+    rows = await db.execute(
+        select(
+            Document.tenant_id,
+            func.count(Document.id).label("document_count"),
+            func.count(Document.id).filter(Document.status == DocumentStatus.INDEXED).label("indexed_count"),
+        )
+        .where(Document.workspace_id == workspace_id)
+        .group_by(Document.tenant_id)
+        .order_by(Document.tenant_id.asc().nulls_first())
+    )
+
+    tenants = []
+    for tenant_id, document_count, indexed_count in rows.all():
+        tenants.append({
+            "tenant_id": tenant_id,          # None = workspace-global docs
+            "document_count": document_count,
+            "indexed_count": indexed_count,
+        })
+
+    return {"workspace_id": workspace_id, "tenants": tenants, "total": len(tenants)}
+
+
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace(
     workspace_id: int,
