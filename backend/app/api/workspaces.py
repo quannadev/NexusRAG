@@ -177,6 +177,123 @@ async def list_workspace_tenants(
     return {"workspace_id": workspace_id, "tenants": tenants, "total": len(tenants)}
 
 
+@router.delete("/{workspace_id}/tenants/{tenant_id}", status_code=status.HTTP_200_OK)
+async def delete_tenant(
+    workspace_id: int,
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all data belonging to a tenant within a workspace.
+
+    Removes:
+    - All tenant documents from the database
+    - Vector store chunks (ChromaDB) tagged with this tenant_id
+    - Knowledge graph directory for this tenant
+    - S3 objects (raw files, markdown, images) under the tenant prefix
+
+    This is a destructive, irreversible operation.
+    """
+    import asyncio
+    import logging
+    from sqlalchemy import select, delete as sa_delete
+    from app.models.document import Document, DocumentImage
+
+    log = logging.getLogger(__name__)
+
+    # Verify workspace exists
+    result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == workspace_id))
+    if result.scalar_one_or_none() is None:
+        raise NotFoundError("KnowledgeBase", workspace_id)
+
+    # Load all documents for this tenant
+    doc_result = await db.execute(
+        select(Document).where(
+            Document.workspace_id == workspace_id,
+            Document.tenant_id == tenant_id,
+        )
+    )
+    documents = doc_result.scalars().all()
+
+    if not documents:
+        return {
+            "deleted_documents": 0,
+            "workspace_id": workspace_id,
+            "tenant_id": tenant_id,
+            "detail": "No documents found for this tenant.",
+        }
+
+    # ── 1. Remove vector chunks ──────────────────────────────────────────
+    try:
+        from app.services.vector_store import get_vector_store
+        vs = get_vector_store(workspace_id)
+        # Delete all chunks where tenant_id matches (ChromaDB where filter)
+        vs.collection.delete(where={"tenant_id": {"$eq": tenant_id}})
+        log.info(f"Deleted vector chunks for tenant={tenant_id} in workspace={workspace_id}")
+    except Exception as exc:
+        log.warning(f"Vector store cleanup failed for tenant={tenant_id}: {exc}")
+
+    # ── 2. Delete knowledge graph directory for this tenant ──────────────
+    try:
+        from app.services.knowledge_graph_service import KnowledgeGraphService
+        kg = KnowledgeGraphService(workspace_id, tenant_id=tenant_id)
+        await kg.delete_project_data()
+        log.info(f"Deleted KG data for tenant={tenant_id} in workspace={workspace_id}")
+    except Exception as exc:
+        log.warning(f"KG cleanup failed for tenant={tenant_id}: {exc}")
+
+    # ── 3. Delete S3 objects for each document ───────────────────────────
+    try:
+        from app.services.storage_service import get_storage_service
+        from app.core.config import settings as _settings
+        storage = get_storage_service()
+
+        for doc in documents:
+            # Raw file
+            if doc.s3_raw_key:
+                await asyncio.to_thread(
+                    storage.delete_object, _settings.S3_BUCKET_DOCUMENTS, doc.s3_raw_key
+                )
+            # Parsed markdown
+            if doc.s3_markdown_key:
+                await asyncio.to_thread(
+                    storage.delete_object, _settings.S3_BUCKET_DOCUMENTS, doc.s3_markdown_key
+                )
+
+        # Image S3 objects
+        doc_ids = [doc.id for doc in documents]
+        img_result = await db.execute(
+            select(DocumentImage.s3_key).where(DocumentImage.document_id.in_(doc_ids))
+        )
+        for (img_key,) in img_result.all():
+            if img_key:
+                await asyncio.to_thread(
+                    storage.delete_object, _settings.S3_BUCKET_DOCUMENTS, img_key
+                )
+
+        log.info(f"Deleted S3 objects for {len(documents)} docs, tenant={tenant_id}")
+    except Exception as exc:
+        log.warning(f"S3 cleanup failed for tenant={tenant_id}: {exc}")
+
+    # ── 4. Delete DB records (images cascade, then documents) ────────────
+    await db.execute(
+        sa_delete(DocumentImage).where(DocumentImage.document_id.in_([d.id for d in documents]))
+    )
+    await db.execute(
+        sa_delete(Document).where(
+            Document.workspace_id == workspace_id,
+            Document.tenant_id == tenant_id,
+        )
+    )
+    await db.commit()
+
+    return {
+        "deleted_documents": len(documents),
+        "workspace_id": workspace_id,
+        "tenant_id": tenant_id,
+        "detail": f"Successfully deleted all data for tenant '{tenant_id}'.",
+    }
+
+
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace(
     workspace_id: int,
