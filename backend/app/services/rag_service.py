@@ -252,8 +252,13 @@ def get_rag_service(
     workspace_id: int,
     kg_language: str | None = None,
     kg_entity_types: list[str] | None = None,
+    tenant_id: str | None = None,
 ) -> "RAGService | NexusRAGService":
-    """Factory function: routes to NexusRAGService or legacy RAGService based on config."""
+    """Factory function: routes to NexusRAGService or legacy RAGService based on config.
+
+    When tenant_id is provided, NexusRAGService will use a tenant-scoped LightRAG
+    working directory (kb_{ws}__t_{tenant_id}/) ensuring full KG isolation per tenant.
+    """
     from app.core.config import settings
 
     if settings.NEXUSRAG_ENABLED:
@@ -263,6 +268,7 @@ def get_rag_service(
             workspace_id=workspace_id,
             kg_language=kg_language,
             kg_entity_types=kg_entity_types,
+            tenant_id=tenant_id,
         )
 
     return RAGService(db=db, workspace_id=workspace_id)

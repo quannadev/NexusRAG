@@ -93,7 +93,7 @@ async def query_documents(
     """Query indexed documents using semantic search (+ optional KG)."""
     await verify_workspace_access(workspace_id, db)
 
-    rag_service = get_rag_service(db, workspace_id)
+    rag_service = get_rag_service(db, workspace_id, tenant_id=request.tenant_id)
 
     # Try deep query if available
     from app.services.nexus_rag_service import NexusRAGService
@@ -104,6 +104,7 @@ async def query_documents(
             document_ids=request.document_ids,
             mode=request.mode,
             metadata_filter=request.metadata_filter,
+            tenant_id=request.tenant_id,
         )
 
         chunks_response = []
@@ -878,7 +879,7 @@ async def chat_with_documents(
     """Chat with documents using NexusRAG retrieval + LLM answer generation."""
     kb = await verify_workspace_access(workspace_id, db)
 
-    rag_service = get_rag_service(db, workspace_id)
+    rag_service = get_rag_service(db, workspace_id, tenant_id=request.tenant_id)
 
     # -- 1. Retrieve relevant chunks via NexusRAG --
     chunks = []
@@ -892,7 +893,8 @@ async def chat_with_documents(
             top_k=8,
             document_ids=request.document_ids,
             mode="hybrid",
-            include_images=False,  # No longer need separate image lookup
+            include_images=False,
+            tenant_id=request.tenant_id,
         )
         chunks = result.chunks
         citations = result.citations

@@ -49,6 +49,10 @@ class Document(Base):
     s3_raw_key: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     s3_markdown_key: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
+    # Tenant isolation — workspace → tenant → documents hierarchy
+    # NULL = no tenant (workspace-global). Set to bot_id / user_id etc for sub-workspace isolation.
+    tenant_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+
     # Relationships
     workspace: Mapped["KnowledgeBase"] = relationship(back_populates="documents")
     images: Mapped[list["DocumentImage"]] = relationship(

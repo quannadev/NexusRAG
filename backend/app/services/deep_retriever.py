@@ -66,6 +66,7 @@ class DeepRetriever:
         document_ids: Optional[list[int]] = None,
         include_images: bool = True,
         metadata_filter: dict | None = None,
+        tenant_id: str | None = None,
     ) -> DeepRetrievalResult:
         """
         Execute hybrid retrieval with reranking.
@@ -82,9 +83,8 @@ class DeepRetriever:
             top_k: Number of final chunks to return (after reranking)
             document_ids: Optional filter to specific documents
             include_images: Whether to find related images
-
-        Returns:
-            DeepRetrievalResult with chunks, citations, context, and optional images
+            tenant_id: Optional sub-workspace tenant — auto-injects into vector filter.
+                       KG is already scoped to tenant via working dir (set at service init).
         """
         # Run KG and vector search in parallel
         kg_task = None
@@ -97,7 +97,7 @@ class DeepRetriever:
         prefetch_k = max(settings.NEXUSRAG_VECTOR_PREFETCH, top_k * 3)
         vector_task = asyncio.create_task(
             asyncio.to_thread(
-                self._vector_query, question, prefetch_k, document_ids, metadata_filter
+                self._vector_query, question, prefetch_k, document_ids, metadata_filter, tenant_id
             )
         )
 
@@ -167,15 +167,18 @@ class DeepRetriever:
         top_k: int,
         document_ids: Optional[list[int]],
         metadata_filter: dict | None = None,
+        tenant_id: str | None = None,
     ) -> tuple[list[EnrichedChunk], list[Citation]]:
         """Synchronous vector search via ChromaDB (over-fetch stage)."""
         query_embedding = self.embedder.embed_query(question)
 
-        # Merge metadata_filter and document_ids
+        # Build where filter: merge metadata_filter + document_ids + tenant_id
         where = metadata_filter.copy() if metadata_filter else {}
+        if tenant_id:
+            where["tenant_id"] = tenant_id
         if document_ids:
             where["document_id"] = {"$in": document_ids}
-            
+
         if not where:
             where = None
 

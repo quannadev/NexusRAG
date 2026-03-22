@@ -84,10 +84,18 @@ class KnowledgeGraphService:
         workspace_id: int,
         kg_language: str | None = None,
         kg_entity_types: list[str] | None = None,
+        tenant_id: str | None = None,
     ):
         self.workspace_id = workspace_id
+        self.tenant_id = tenant_id
+        # Each tenant gets a separate LightRAG working directory for full KG isolation.
+        # kb_{ws}/ = workspace-global (no tenant)
+        # kb_{ws}__t_{tenant}/ = tenant-scoped isolated graph
+        dir_name = f"kb_{workspace_id}"
+        if tenant_id:
+            dir_name += f"__t_{tenant_id}"
         self.working_dir = str(
-            settings.BASE_DIR / "data" / "lightrag" / f"kb_{workspace_id}"
+            settings.BASE_DIR / "data" / "lightrag" / dir_name
         )
         # Per-workspace overrides (fallback to global settings)
         self.kg_language = kg_language or settings.NEXUSRAG_KG_LANGUAGE

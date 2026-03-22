@@ -95,6 +95,10 @@ class Settings(BaseSettings):
     S3_BUCKET_IMAGES: str = Field(default="nexusrag-images")
     # TTL for presigned URLs served to clients (seconds)
     S3_PRESIGN_EXPIRES_SECONDS: int = Field(default=3600)
+    # Public-facing MinIO URL used when generating browser-accessible presigned URLs.
+    # Defaults to S3_ENDPOINT_URL but MUST be overridden in Docker to the host-accessible
+    # address (e.g. http://localhost:9000 when running locally with port mapping).
+    S3_PUBLIC_URL: str = Field(default="")
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5174", "http://localhost:3000"]

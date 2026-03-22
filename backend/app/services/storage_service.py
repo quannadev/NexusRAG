@@ -51,6 +51,20 @@ class StorageService:
             config=Config(signature_version="s3v4"),
         )
 
+        # Separate client for presigning — uses the public-facing URL so that
+        # browsers can actually reach the signed endpoint.  In Docker the internal
+        # endpoint is http://minio:9000 (unreachable from host browser), while the
+        # public URL is http://localhost:9000 (port-mapped from the host).
+        public_url = settings.S3_PUBLIC_URL or settings.S3_ENDPOINT_URL
+        self._presign_client = boto3.client(
+            "s3",
+            endpoint_url=public_url,
+            aws_access_key_id=settings.S3_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+            region_name=settings.S3_REGION,
+            config=Config(signature_version="s3v4"),
+        )
+
     # ------------------------------------------------------------------
     # Bucket bootstrap
     # ------------------------------------------------------------------
@@ -136,7 +150,7 @@ class StorageService:
             Pre-signed URL string
         """
         ttl = expires_in if expires_in is not None else settings.S3_PRESIGN_EXPIRES_SECONDS
-        url: str = self._client.generate_presigned_url(
+        url: str = self._presign_client.generate_presigned_url(
             "get_object",
             Params={"Bucket": bucket, "Key": key},
             ExpiresIn=ttl,
@@ -148,25 +162,34 @@ class StorageService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def raw_key(workspace_id: int, sha256hex: str, ext: str) -> str:
+    def _tenant_prefix(workspace_id: int, tenant_id: str | None) -> str:
+        """Build the S3 path prefix for this workspace (+ optional tenant)."""
+        if tenant_id:
+            return f"kb_{workspace_id}/tenant_{tenant_id}"
+        return f"kb_{workspace_id}"
+
+    @staticmethod
+    def raw_key(workspace_id: int, sha256hex: str, ext: str, tenant_id: str | None = None) -> str:
         """Build the S3 key for a raw uploaded document."""
         # Ensure ext starts with a dot
         if ext and not ext.startswith("."):
             ext = f".{ext}"
-        return f"kb_{workspace_id}/raw/{sha256hex}{ext}"
+        prefix = StorageService._tenant_prefix(workspace_id, tenant_id)
+        return f"{prefix}/raw/{sha256hex}{ext}"
 
     @staticmethod
-    def markdown_key(workspace_id: int, sha256hex: str) -> str:
+    def markdown_key(workspace_id: int, sha256hex: str, tenant_id: str | None = None) -> str:
         """Build the S3 key for a parsed markdown file."""
-        return f"kb_{workspace_id}/markdown/{sha256hex}.md"
+        prefix = StorageService._tenant_prefix(workspace_id, tenant_id)
+        return f"{prefix}/markdown/{sha256hex}.md"
 
     @staticmethod
-    def image_key(workspace_id: int, image_id: str) -> str:
+    def image_key(workspace_id: int, image_id: str, tenant_id: str | None = None) -> str:
         """Build the S3 key for an extracted document image."""
-        return f"kb_{workspace_id}/images/{image_id}.png"
+        prefix = StorageService._tenant_prefix(workspace_id, tenant_id)
+        return f"{prefix}/images/{image_id}.png"
 
 
 @lru_cache(maxsize=1)
 def get_storage_service() -> StorageService:
     """Return the singleton StorageService instance."""
-    return StorageService()

@@ -229,6 +229,7 @@ async def _execute_search_documents(
     top_k: int,
     db: AsyncSession,
     existing_ids: set[str],
+    tenant_id: str | None = None,
 ) -> tuple[str, list[ChatSourceChunk], list[ChatImageRef], list[dict]]:
     """Execute document search and return formatted context + structured sources.
 
@@ -240,7 +241,7 @@ async def _execute_search_documents(
     from pathlib import Path as _P
     from app.core.config import settings
 
-    rag_service = get_rag_service(db, workspace_id)
+    rag_service = get_rag_service(db, workspace_id, tenant_id=tenant_id)
 
     chunks = []
     citations = []
@@ -250,6 +251,7 @@ async def _execute_search_documents(
             top_k=min(top_k, 10),
             mode="hybrid",
             include_images=False,
+            tenant_id=tenant_id,
         )
         chunks = result.chunks
         citations = result.citations
@@ -440,7 +442,7 @@ async def agent_chat_stream(
         yield {"event": "status", "data": {"step": "retrieving", "detail": f"Searching: {message[:80]}..."}}
 
         context, sources, images, img_parts = await _execute_search_documents(
-            workspace_id, message, 8, db, existing_ids,
+            workspace_id, message, 8, db, existing_ids, tenant_id=request.tenant_id,
         )
         all_sources.extend(sources)
         all_images.extend(images)
@@ -548,7 +550,7 @@ async def agent_chat_stream(
                 }}
 
                 context, sources, images, img_parts = await _execute_search_documents(
-                    workspace_id, query, top_k, db, existing_ids,
+                    workspace_id, query, top_k, db, existing_ids, tenant_id=request.tenant_id,
                 )
                 all_sources.extend(sources)
                 all_images.extend(images)
@@ -689,7 +691,7 @@ async def agent_chat_stream(
         }}
 
         context, sources, images, img_parts = await _execute_search_documents(
-            workspace_id, message, 8, db, existing_ids,
+            workspace_id, message, 8, db, existing_ids, tenant_id=request.tenant_id,
         )
         all_sources.extend(sources)
         all_images.extend(images)

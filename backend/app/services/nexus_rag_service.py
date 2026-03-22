@@ -52,22 +52,25 @@ class NexusRAGService:
         workspace_id: int,
         kg_language: str | None = None,
         kg_entity_types: list[str] | None = None,
+        tenant_id: str | None = None,
     ):
         self.db = db
         self.workspace_id = workspace_id
+        self.tenant_id = tenant_id
 
         # Services
         self.parser = DeepDocumentParser(workspace_id=workspace_id)
         self.embedder = get_embedding_service()
         self.vector_store = get_vector_store(workspace_id)
 
-        # KG service (optional, gated by config)
+        # KG service — scoped to tenant when provided (isolated LightRAG graph dir)
         self.kg_service: Optional[KnowledgeGraphService] = None
         if settings.NEXUSRAG_ENABLE_KG:
             self.kg_service = KnowledgeGraphService(
                 workspace_id=workspace_id,
                 kg_language=kg_language,
                 kg_entity_types=kg_entity_types,
+                tenant_id=tenant_id,
             )
 
         # Retriever (with cross-encoder reranker)
@@ -231,6 +234,8 @@ class NexusRAGService:
                             "image_urls": "|".join(
                                 _img_url_map.get(iid, "") for iid in c.image_refs
                             ) if c.image_refs else "",
+                            # Tenant isolation — empty string = no tenant (workspace-global)
+                            "tenant_id": self.tenant_id or "",
                         }
                         if document.custom_metadata:
                             meta.update(document.custom_metadata)
@@ -348,9 +353,12 @@ class NexusRAGService:
         mode: str = "hybrid",
         include_images: bool = True,
         metadata_filter: dict | None = None,
+        tenant_id: str | None = None,
     ) -> DeepRetrievalResult:
         """
         Full async hybrid retrieval with KG + vector + images + citations.
+        tenant_id (if provided) auto-injects into vector filter and selects the
+        tenant-scoped KG graph — ensures complete data isolation per tenant.
         """
         return await self.retriever.query(
             question=question,
@@ -359,6 +367,7 @@ class NexusRAGService:
             document_ids=document_ids,
             include_images=include_images,
             metadata_filter=metadata_filter,
+            tenant_id=tenant_id,
         )
 
     # ------------------------------------------------------------------

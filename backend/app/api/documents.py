@@ -157,6 +157,7 @@ async def upload_document(
     workspace_id: int,
     file: UploadFile = File(...),
     custom_metadata: str | None = Form(None),
+    tenant_id: str | None = Form(None, description="Tenant/bot ID for sub-workspace isolation"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -166,6 +167,9 @@ async def upload_document(
     - If a document with an identical SHA-256 already exists and is INDEXED,
       returns a 200 with the existing document info.
     - Raw file is uploaded to S3 only if no object with that key yet exists.
+
+    tenant_id (optional): isolates the document to a specific tenant/bot.
+    Queries with matching tenant_id will only see this document.
     """
     parsed_metadata = None
     if custom_metadata:
@@ -205,13 +209,15 @@ async def upload_document(
 
     # --- Content-addressable deduplication ---
     sha256_hex = hashlib.sha256(content).hexdigest()
-    s3_raw_key = get_storage_service().raw_key(workspace_id, sha256_hex, ext)
+    # S3 raw key includes tenant prefix when tenant_id is provided
+    s3_raw_key = get_storage_service().raw_key(workspace_id, sha256_hex, ext, tenant_id=tenant_id)
 
-    # Check if an INDEXED document with this hash already exists in this workspace
+    # Check if an INDEXED document with this hash already exists in this workspace (and same tenant)
     existing_result = await db.execute(
         select(Document).where(
             Document.workspace_id == workspace_id,
             Document.file_sha256 == sha256_hex,
+            Document.tenant_id == tenant_id,
             Document.status == DocumentStatus.INDEXED,
         )
     )
@@ -261,6 +267,7 @@ async def upload_document(
         file_sha256=sha256_hex,
         s3_raw_key=s3_raw_key,
         s3_bucket=settings.S3_BUCKET_DOCUMENTS,
+        tenant_id=tenant_id,
     )
     db.add(document)
     await db.commit()

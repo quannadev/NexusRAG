@@ -11,6 +11,7 @@ class RAGQueryRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20, description="Number of chunks to retrieve")
     document_ids: list[int] | None = Field(default=None, description="Filter to specific document IDs")
     metadata_filter: dict | None = Field(default=None, description="Optional metadata filter for vector search")
+    tenant_id: str | None = Field(default=None, description="Tenant/bot ID for sub-workspace isolation")
     mode: str = Field(
         default="hybrid",
         description="Search mode: hybrid (default), vector_only, naive, local, global"
@@ -173,6 +174,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000)
     history: list[ChatMessageSchema] = []
     document_ids: list[int] | None = None
+    tenant_id: str | None = Field(default=None, description="Tenant/bot ID for sub-workspace isolation")
     enable_thinking: bool = False
     force_search: bool = False  # Pre-search before LLM call; injects sources as context directly
 
